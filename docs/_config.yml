@@ -3,7 +3,7 @@ description: Terminal-first monitor configuration for Hyprland.
 lang: en-US
 timezone: Europe/Berlin
 url: https://crmne.github.io
-baseurl: /hyprmoncfg
+baseurl: ""
 
 markdown: kramdown
 kramdown:
@@ -55,7 +55,7 @@ jekyll_vitepress:
     format: "%Y-%m-%d %H:%M"
   edit_link:
     enabled: true
-    pattern: "https://github.com/crmne/hyprmoncfg/edit/main/site/:path"
+    pattern: "https://github.com/crmne/hyprmoncfg/edit/main/docs/:path"
     text: Edit this page on GitHub
   github_star:
     enabled: true
