@@ -188,9 +188,10 @@ type Model struct {
 	snap          *snapHintState
 	snapSeq       int
 
-	status    string
-	statusErr bool
-	dirty     bool
+	status     string
+	statusErr  bool
+	dirty      bool
+	draftSaved bool
 
 	width  int
 	height int
@@ -228,10 +229,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		if m.picker != nil {
-			m.picker.List.SetSize(44, m.modePickerHeight())
+			m.picker.List.SetSize(m.modePickerWidth(), m.modePickerHeight())
 		}
 		if m.saveDialog != nil {
-			m.saveDialog.List.SetSize(52, clampInt(defaultHeight(m.height)-18, 5, 10))
+			m.saveDialog.List.SetSize(m.saveDialogListWidth(), clampInt(defaultHeight(m.height)-18, 3, 10))
+			m.saveDialog.Input.Width = m.saveDialogInputWidth()
+		}
+		if m.input != nil {
+			m.input.Input.Width = clampInt(m.modalMaxWidth()-16, 8, 12)
 		}
 		return m, nil
 
@@ -262,6 +267,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mode = modeMain
 		m.saveDialog = nil
 		m.saveOverwrite = ""
+		m.draftSaved = true
 		m.setStatusOK(fmt.Sprintf("Saved profile %q", msg.name))
 		return m, m.refreshCmd()
 
@@ -303,7 +309,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setStatusErr(fmt.Sprintf("Revert failed: %v", msg.err))
 			return m, nil
 		}
-		m.dirty = false
+		m.markClean()
 		m.setStatusOK("Configuration reverted: " + msg.reason)
 		return m, m.refreshCmd()
 
@@ -354,7 +360,7 @@ func (m Model) updateMainKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.tab = tabWorkspaces
 		return m, nil
 	case "r":
-		m.dirty = false
+		m.markClean()
 		return m, m.refreshCmd()
 	case "s":
 		return m.openSaveDialog()
@@ -459,7 +465,7 @@ func (m Model) updateLayoutKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		default:
 			return m, nil
 		}
-		m.dirty = true
+		m.markDirty()
 		return m, cmd
 	}
 
@@ -478,7 +484,7 @@ func (m Model) updateLayoutKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	m.dirty = true
+	m.markDirty()
 	return m, nil
 }
 
@@ -532,7 +538,7 @@ func (m Model) updateWorkspaceKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	m.dirty = true
+	m.markDirty()
 	return m, nil
 }
 
@@ -548,7 +554,7 @@ func (m Model) updateConfirmKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "y", "enter":
 		m.mode = modeMain
 		m.pending = nil
-		m.dirty = false
+		m.markClean()
 		m.setStatusOK("Configuration kept")
 		return m, m.refreshCmd()
 	case "n", "esc":
@@ -595,6 +601,7 @@ func (m Model) renderMain() string {
 	}
 
 	status := m.renderStatus()
+	helpText := m.styles.help.MaxWidth(max(20, m.terminalWidth()-2)).Render(help)
 	return strings.Join([]string{
 		title,
 		tabs,
@@ -602,7 +609,7 @@ func (m Model) renderMain() string {
 		body,
 		"",
 		status,
-		m.styles.help.Render(help),
+		helpText,
 	}, "\n")
 }
 
@@ -620,15 +627,14 @@ func (m Model) renderTabs() string {
 }
 
 func (m Model) renderLayoutView() string {
-	canvasWidth := max(48, (m.width*2)/3)
-	inspectorWidth := max(34, m.width-canvasWidth-6)
+	canvasWidth, inspectorWidth := m.layoutPaneWidths()
 	canvas := m.renderCanvasPane(canvasWidth)
 	inspector := m.renderInspectorPane(inspectorWidth)
 	return lipgloss.JoinHorizontal(lipgloss.Top, canvas, "  ", inspector)
 }
 
 func (m Model) renderCanvasPane(width int) string {
-	canvasHeight := clampInt(m.height-12, 12, 26)
+	canvasHeight := clampInt(m.terminalHeight()-12, 8, 26)
 	lines := []string{
 		m.styles.header.Render("Monitor Layout"),
 		m.styles.subtle.Render("Drag cards to reposition monitors. Change Mode to change their size."),
@@ -661,7 +667,7 @@ func (m Model) renderCanvasPane(width int) string {
 	if m.layoutFocus == layoutFocusCanvas && m.tab == tabLayout {
 		panel = m.styles.activePane
 	}
-	return panel.Width(width).Render(strings.Join(lines, "\n"))
+	return panel.Width(max(1, width-panel.GetHorizontalFrameSize())).Render(strings.Join(lines, "\n"))
 }
 
 func (m Model) renderCanvas(width, height int) string {
@@ -752,12 +758,11 @@ func (m Model) renderInspectorPane(width int) string {
 	if m.layoutFocus == layoutFocusInspector && m.tab == tabLayout {
 		panel = m.styles.activePane
 	}
-	return panel.Width(width).Render(strings.Join(lines, "\n"))
+	return panel.Width(max(1, width-panel.GetHorizontalFrameSize())).Render(strings.Join(lines, "\n"))
 }
 
 func (m Model) renderProfilesView() string {
-	listWidth := max(34, m.width/3)
-	detailWidth := max(40, m.width-listWidth-6)
+	listWidth, detailWidth := m.sidePaneWidths(35)
 
 	listLines := []string{m.styles.header.Render("Saved Profiles"), ""}
 	if len(m.profiles) == 0 {
@@ -799,14 +804,15 @@ func (m Model) renderProfilesView() string {
 		}
 	}
 
-	left := m.styles.activePane.Width(listWidth).Render(strings.Join(listLines, "\n"))
-	right := m.styles.inactivePane.Width(detailWidth).Render(strings.Join(detailLines, "\n"))
+	leftStyle := m.styles.activePane
+	rightStyle := m.styles.inactivePane
+	left := leftStyle.Width(max(1, listWidth-leftStyle.GetHorizontalFrameSize())).Render(strings.Join(listLines, "\n"))
+	right := rightStyle.Width(max(1, detailWidth-rightStyle.GetHorizontalFrameSize())).Render(strings.Join(detailLines, "\n"))
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, "  ", right)
 }
 
 func (m Model) renderWorkspaceView() string {
-	leftWidth := max(40, m.width/3)
-	rightWidth := max(44, m.width-leftWidth-6)
+	leftWidth, rightWidth := m.sidePaneWidths(35)
 
 	settings := []string{
 		m.styles.header.Render("Workspace Planner"),
@@ -857,8 +863,10 @@ func (m Model) renderWorkspaceView() string {
 		}
 	}
 
-	left := m.styles.activePane.Width(leftWidth).Render(strings.Join(settings, "\n"))
-	right := m.styles.inactivePane.Width(rightWidth).Render(strings.Join(previewLines, "\n"))
+	leftStyle := m.styles.activePane
+	rightStyle := m.styles.inactivePane
+	left := leftStyle.Width(max(1, leftWidth-leftStyle.GetHorizontalFrameSize())).Render(strings.Join(settings, "\n"))
+	right := rightStyle.Width(max(1, rightWidth-rightStyle.GetHorizontalFrameSize())).Render(strings.Join(previewLines, "\n"))
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, "  ", right)
 }
 
@@ -871,9 +879,11 @@ func (m Model) renderSavePrompt() string {
 		"",
 		m.saveDialog.List.View(),
 		"",
-		m.renderStatus(),
-		m.styles.help.Render("Type to filter names. Up/Down selects an existing profile. Enter saves. Esc cancels."),
 	}
+	if status := m.renderErrorStatus(); status != "" {
+		body = append(body, status, "")
+	}
+	body = append(body, m.styles.help.MaxWidth(max(20, m.modalMaxWidth()-6)).Render("Type to filter names. Up/Down selects an existing profile. Enter saves. Esc cancels."))
 	return m.renderModalFrame("Save Profile", body)
 }
 
@@ -902,7 +912,7 @@ func (m Model) renderConfirm() string {
 		m.styles.subtle.Render(fmt.Sprintf("Keep it within %ds or the previous state will be restored.", remaining)),
 		"",
 		m.renderStatus(),
-		m.styles.help.Render("Enter or y keeps the change. Esc or n reverts it."),
+		m.styles.help.MaxWidth(max(20, m.modalMaxWidth()-6)).Render("Enter or y keeps the change. Esc or n reverts it."),
 	}
 	return m.renderModalFrame("Confirm Apply", body)
 }
@@ -912,9 +922,16 @@ func (m Model) renderStatus() string {
 		return ""
 	}
 	if m.statusErr {
-		return m.styles.statusError.Render(m.status)
+		return m.styles.statusError.MaxWidth(max(20, m.terminalWidth()-2)).Render(m.status)
 	}
-	return m.styles.statusOK.Render(m.status)
+	return m.styles.statusOK.MaxWidth(max(20, m.terminalWidth()-2)).Render(m.status)
+}
+
+func (m Model) renderErrorStatus() string {
+	if m.status == "" || !m.statusErr {
+		return ""
+	}
+	return m.styles.statusError.MaxWidth(max(20, m.modalMaxWidth()-6)).Render(m.status)
 }
 
 func (m *Model) loadLiveState() {
@@ -940,7 +957,7 @@ func (m *Model) loadLiveState() {
 	m.picker = nil
 	m.input = nil
 	m.drag = nil
-	m.dirty = false
+	m.markClean()
 }
 
 func (m *Model) loadProfile(p profile.Profile) {
@@ -957,6 +974,7 @@ func (m *Model) loadProfile(p profile.Profile) {
 	m.input = nil
 	m.drag = nil
 	m.dirty = true
+	m.draftSaved = true
 	m.setStatusOK(fmt.Sprintf("Loaded profile %q into editor", p.Name))
 }
 
@@ -1366,6 +1384,16 @@ func (m *Model) setStatusErr(msg string) {
 func (m *Model) setStatusOK(msg string) {
 	m.status = msg
 	m.statusErr = false
+}
+
+func (m *Model) markDirty() {
+	m.dirty = true
+	m.draftSaved = false
+}
+
+func (m *Model) markClean() {
+	m.dirty = false
+	m.draftSaved = false
 }
 
 func editableOutputFromMonitor(m hypr.Monitor) editableOutput {

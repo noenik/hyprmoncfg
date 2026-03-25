@@ -88,17 +88,24 @@ type canvasGeometry struct {
 }
 
 func (m Model) renderTitleBar() string {
-	badges := []string{
-		m.unsavedBadge(),
+	width := m.terminalWidth()
+	title := m.styles.title.Render("hyprmoncfg")
+	badge := m.unsavedBadge()
+
+	if width < 40 {
+		return title
 	}
-	return lipgloss.JoinHorizontal(
-		lipgloss.Left,
-		m.styles.title.Render("hyprmoncfg"),
-		" ",
-		m.styles.subtitle.Render("Hyprland monitor layout and workspace planner"),
-		"  ",
-		lipgloss.JoinHorizontal(lipgloss.Left, badges...),
-	)
+	if width < 68 {
+		return lipgloss.JoinHorizontal(lipgloss.Left, title, " ", badge)
+	}
+
+	subtitleText := "Hyprland monitor layout and workspace planner"
+	if width < 104 {
+		subtitleText = "Hyprland monitor planner"
+	}
+	subtitleBudget := max(12, width-lipgloss.Width(title)-lipgloss.Width(badge)-6)
+	subtitle := m.styles.subtitle.Render(fitString(subtitleText, subtitleBudget))
+	return lipgloss.JoinHorizontal(lipgloss.Left, title, " ", subtitle, "  ", badge)
 }
 
 func (m Model) renderModalFrame(title string, body []string) string {
@@ -106,7 +113,7 @@ func (m Model) renderModalFrame(title string, body []string) string {
 	if len(body) > 0 {
 		lines = append(lines, "", strings.Join(body, "\n"))
 	}
-	return m.styles.modal.Render(strings.Join(lines, "\n"))
+	return m.styles.modal.MaxWidth(m.modalMaxWidth()).Render(strings.Join(lines, "\n"))
 }
 
 func (m Model) renderModalScreen(overlay string) string {
@@ -114,14 +121,8 @@ func (m Model) renderModalScreen(overlay string) string {
 		return m.renderMain()
 	}
 
-	width := m.width
-	if width <= 0 {
-		width = 100
-	}
-	height := m.height
-	if height <= 0 {
-		height = 28
-	}
+	width := m.terminalWidth()
+	height := m.terminalHeight()
 
 	title := m.renderTitleBar()
 	tabs := m.renderTabs()
@@ -142,8 +143,11 @@ func (m Model) monitorStateBadge(output editableOutput) string {
 }
 
 func (m Model) unsavedBadge() string {
-	if m.dirty {
+	if m.dirty && !m.draftSaved {
 		return m.styles.badgeAccent.Render("Unsaved Changes")
+	}
+	if m.dirty && m.draftSaved {
+		return m.styles.badgeOn.Render("Saved Draft")
 	}
 	return m.styles.badgeMuted.Render("Current setup")
 }
@@ -170,7 +174,7 @@ func (m Model) activateInspectorField() (tea.Model, tea.Cmd) {
 		delegate.Styles.SelectedTitle = m.styles.focused.Copy().UnsetPadding()
 		delegate.Styles.DimmedTitle = m.styles.subtle
 		delegate.Styles.FilterMatch = m.styles.badgeAccent
-		picker := list.New(items, delegate, 44, m.modePickerHeight())
+		picker := list.New(items, delegate, m.modePickerWidth(), m.modePickerHeight())
 		picker.Title = fmt.Sprintf("Mode for %s", output.Name)
 		picker.SetShowHelp(false)
 		picker.SetShowPagination(false)
@@ -195,7 +199,7 @@ func (m Model) activateInspectorField() (tea.Model, tea.Cmd) {
 		input.Prompt = ""
 		input.Placeholder = "1.00"
 		input.CharLimit = 8
-		input.Width = 12
+		input.Width = clampInt(m.modalMaxWidth()-16, 8, 12)
 		input.TextStyle = m.styles.value
 		input.PlaceholderStyle = m.styles.subtle
 		input.Cursor.Style = m.styles.focused
@@ -215,7 +219,7 @@ func (m Model) activateInspectorField() (tea.Model, tea.Cmd) {
 		input := textinput.New()
 		input.Prompt = ""
 		input.CharLimit = 8
-		input.Width = 12
+		input.Width = clampInt(m.modalMaxWidth()-16, 8, 12)
 		input.TextStyle = m.styles.value
 		input.PlaceholderStyle = m.styles.subtle
 		input.Cursor.Style = m.styles.focused
@@ -244,7 +248,7 @@ func (m Model) activateInspectorField() (tea.Model, tea.Cmd) {
 		return m, cmd
 	default:
 		m.adjustInspectorField(1)
-		m.dirty = true
+		m.markDirty()
 		return m, nil
 	}
 }
@@ -285,7 +289,7 @@ func (m *Model) openSaveDialog() (tea.Model, tea.Cmd) {
 	input := textinput.New()
 	input.Prompt = ""
 	input.CharLimit = 64
-	input.Width = 28
+	input.Width = m.saveDialogInputWidth()
 	input.TextStyle = m.styles.value
 	input.PlaceholderStyle = m.styles.subtle
 	input.Cursor.Style = m.styles.focused
@@ -306,8 +310,8 @@ func (m *Model) openSaveDialog() (tea.Model, tea.Cmd) {
 	delegate.Styles.DimmedDesc = m.styles.subtle
 	delegate.Styles.FilterMatch = m.styles.badgeAccent
 
-	listHeight := clampInt(defaultHeight(m.height)-18, 5, 10)
-	profileList := list.New(nil, delegate, 52, listHeight)
+	listHeight := clampInt(defaultHeight(m.height)-18, 3, 10)
+	profileList := list.New(nil, delegate, m.saveDialogListWidth(), listHeight)
 	profileList.Title = "Existing Profiles"
 	profileList.SetShowHelp(false)
 	profileList.SetShowPagination(false)
@@ -481,7 +485,7 @@ func (m Model) commitModePicker() (tea.Model, tea.Cmd) {
 		output.ModeIndex = 0
 	}
 	output.applyMode(output.Modes[output.ModeIndex])
-	m.dirty = true
+	m.markDirty()
 	m.setStatusOK(fmt.Sprintf("Selected %s for %s", output.DisplayMode(), output.Name))
 	m.picker = nil
 	m.mode = modeMain
@@ -528,7 +532,7 @@ func (m Model) commitNumericInput() (tea.Model, tea.Cmd) {
 		}
 		value = clampFloat(value, 0.25, 4.0)
 		m.editOutputs[m.input.OutputIndex].Scale = value
-		m.dirty = true
+		m.markDirty()
 		m.setStatusOK(fmt.Sprintf("Scale set to %.2f for %s", value, m.editOutputs[m.input.OutputIndex].Name))
 	case numericInputPositionX:
 		value, err := strconv.Atoi(strings.TrimSpace(m.input.Input.Value()))
@@ -537,7 +541,7 @@ func (m Model) commitNumericInput() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.editOutputs[m.input.OutputIndex].X = value
-		m.dirty = true
+		m.markDirty()
 		m.setStatusOK(fmt.Sprintf("Position X set to %d for %s", value, m.editOutputs[m.input.OutputIndex].Name))
 	case numericInputPositionY:
 		value, err := strconv.Atoi(strings.TrimSpace(m.input.Input.Value()))
@@ -546,7 +550,7 @@ func (m Model) commitNumericInput() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.editOutputs[m.input.OutputIndex].Y = value
-		m.dirty = true
+		m.markDirty()
 		m.setStatusOK(fmt.Sprintf("Position Y set to %d for %s", value, m.editOutputs[m.input.OutputIndex].Name))
 	}
 
@@ -569,7 +573,7 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		if m.drag != nil {
 			m.selectedOutput = m.drag.OutputIndex
 			cmd := m.showSnapHint(m.applySelectedSnap(36))
-			m.dirty = true
+			m.markDirty()
 			m.drag = nil
 			return m, cmd
 		}
@@ -624,9 +628,8 @@ func (m Model) updateModePickerMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) updateLayoutMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	bodyY := m.bodyOriginY()
-	canvasWidth := max(48, (m.width*2)/3)
-	inspectorWidth := max(34, m.width-canvasWidth-6)
-	layout := m.canvasLayout(canvasWidth-4, clampInt(m.height-12, 12, 26))
+	canvasWidth, inspectorWidth := m.layoutPaneWidths()
+	layout := m.canvasLayout(canvasWidth-4, clampInt(m.terminalHeight()-12, 8, 26))
 
 	if m.inCanvas(msg.X, msg.Y, bodyY, canvasWidth, layout) {
 		m.layoutFocus = layoutFocusCanvas
@@ -648,7 +651,7 @@ func (m Model) updateLayoutMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 				m.moveSelectedOutput(worldDX, worldDY)
 				m.drag.LastX = msg.X
 				m.drag.LastY = msg.Y
-				m.dirty = true
+				m.markDirty()
 			}
 		}
 		return m, nil
@@ -666,10 +669,10 @@ func (m Model) updateLayoutMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 				}
 			case tea.MouseButtonWheelUp:
 				m.adjustInspectorField(1)
-				m.dirty = true
+				m.markDirty()
 			case tea.MouseButtonWheelDown:
 				m.adjustInspectorField(-1)
-				m.dirty = true
+				m.markDirty()
 			}
 		}
 	}
@@ -693,7 +696,7 @@ func (m Model) updateProfilesMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) updateWorkspaceMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	bodyY := m.bodyOriginY()
-	leftWidth := max(40, m.width/3)
+	leftWidth, _ := m.sidePaneWidths(35)
 
 	if msg.X < 0 || msg.X >= leftWidth || msg.Y < bodyY {
 		return m, nil
@@ -705,10 +708,10 @@ func (m Model) updateWorkspaceMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		switch msg.Button {
 		case tea.MouseButtonWheelUp:
 			m.adjustWorkspaceField(1)
-			m.dirty = true
+			m.markDirty()
 		case tea.MouseButtonWheelDown:
 			m.adjustWorkspaceField(-1)
-			m.dirty = true
+			m.markDirty()
 		}
 		return m, nil
 	}
@@ -901,4 +904,59 @@ func defaultHeight(height int) int {
 
 func (m Model) modePickerHeight() int {
 	return clampInt(defaultHeight(m.height)-14, 6, 10)
+}
+
+func (m Model) terminalWidth() int {
+	if m.width <= 0 {
+		return 100
+	}
+	return max(28, m.width)
+}
+
+func (m Model) terminalHeight() int {
+	if m.height <= 0 {
+		return 28
+	}
+	return max(12, m.height)
+}
+
+func (m Model) modalMaxWidth() int {
+	return max(24, m.terminalWidth()-6)
+}
+
+func (m Model) modePickerWidth() int {
+	return clampInt(m.modalMaxWidth()-6, 24, 44)
+}
+
+func (m Model) saveDialogInputWidth() int {
+	return clampInt(m.modalMaxWidth()-18, 16, 28)
+}
+
+func (m Model) saveDialogListWidth() int {
+	return clampInt(m.modalMaxWidth()-6, 24, 52)
+}
+
+func (m Model) layoutPaneWidths() (int, int) {
+	return splitPaneWidths(m.terminalWidth(), 66, 18)
+}
+
+func (m Model) sidePaneWidths(leftPercent int) (int, int) {
+	return splitPaneWidths(m.terminalWidth(), leftPercent, 16)
+}
+
+func splitPaneWidths(total int, leftPercent int, minPane int) (int, int) {
+	available := max(2, total-2)
+	left := (available * leftPercent) / 100
+	right := available - left
+	if available >= minPane*2 {
+		if left < minPane {
+			left = minPane
+			right = available - left
+		}
+		if right < minPane {
+			right = minPane
+			left = available - right
+		}
+	}
+	return max(1, left), max(1, right)
 }

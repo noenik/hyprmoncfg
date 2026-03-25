@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/crmne/hyprmoncfg/internal/profile"
 )
@@ -198,6 +199,102 @@ func TestSaveDialogAllowsJKInProfileName(t *testing.T) {
 	}
 }
 
+func TestSaveMarksDraftAsSavedWithoutDiscardingEditorState(t *testing.T) {
+	m := Model{
+		styles: newStyles(),
+		mode:   modeSave,
+		dirty:  true,
+	}
+
+	updatedModel, _ := m.Update(saveMsg{name: "Desk Home"})
+	got := updatedModel.(Model)
+
+	if !got.dirty {
+		t.Fatal("expected saved draft to remain editable")
+	}
+	if !got.draftSaved {
+		t.Fatal("expected draft to be marked as saved")
+	}
+	if !strings.Contains(got.unsavedBadge(), "Saved Draft") {
+		t.Fatalf("expected badge to show saved draft, got %q", got.unsavedBadge())
+	}
+}
+
+func TestSaveDialogDoesNotShowStaleSuccessStatus(t *testing.T) {
+	m := Model{
+		styles:   newStyles(),
+		height:   30,
+		profiles: []profile.Profile{{Name: "Laptop Home"}},
+	}
+
+	updatedModel, _ := m.openSaveDialog()
+	got := updatedModel.(*Model)
+	got.setStatusOK("Loaded 2 monitors and 1 profiles")
+
+	view := got.renderSavePrompt()
+	if strings.Contains(view, "Loaded 2 monitors and 1 profiles") {
+		t.Fatalf("expected save dialog to hide stale success status, got:\n%s", view)
+	}
+
+	got.setStatusErr("Profile name cannot be empty")
+	view = got.renderSavePrompt()
+	if !strings.Contains(view, "Profile name cannot be empty") {
+		t.Fatalf("expected save dialog to show errors, got:\n%s", view)
+	}
+}
+
+func TestRenderMainFitsNarrowTerminalWidth(t *testing.T) {
+	m := Model{
+		styles:      newStyles(),
+		mode:        modeMain,
+		tab:         tabLayout,
+		layoutFocus: layoutFocusInspector,
+		width:       60,
+		height:      24,
+		editOutputs: []editableOutput{{
+			Key:             "microstep|mpg321ur-qd",
+			Name:            "DP-1",
+			Description:     "Microstep MPG321UR-QD",
+			Enabled:         true,
+			Modes:           []string{"3840x2160@143.99Hz"},
+			ModeIndex:       0,
+			Width:           3840,
+			Height:          2160,
+			Refresh:         143.99,
+			X:               0,
+			Y:               0,
+			Scale:           1.33,
+			ActiveWorkspace: "1",
+		}},
+		workspaceEdit: workspaceEditor{
+			Enabled:       true,
+			Strategy:      profile.WorkspaceStrategySequential,
+			MaxWorkspaces: 9,
+			GroupSize:     3,
+		},
+	}
+
+	if width := maxRenderedLineWidth(m.renderMain()); width > m.width {
+		t.Fatalf("expected main view to fit width %d, got max line width %d", m.width, width)
+	}
+}
+
+func TestSaveModalFitsNarrowTerminalWidth(t *testing.T) {
+	m := Model{
+		styles:   newStyles(),
+		width:    60,
+		height:   24,
+		profiles: []profile.Profile{{Name: "Laptop Home"}, {Name: "Desk Dock"}},
+	}
+
+	updatedModel, _ := m.openSaveDialog()
+	got := updatedModel.(*Model)
+
+	if width := maxRenderedLineWidth(got.View()); width > got.width {
+		t.Fatalf("expected save modal to fit width %d, got max line width %d", got.width, width)
+	}
+}
+
 func TestPreviewSelectedSnapShowsAlignedBottomEdgeWithoutMoving(t *testing.T) {
 	m := Model{
 		selectedOutput: 1,
@@ -276,4 +373,12 @@ func hasSnapMark(marks []snapMark, outputIndex int, edge snapEdge) bool {
 		}
 	}
 	return false
+}
+
+func maxRenderedLineWidth(view string) int {
+	maxWidth := 0
+	for _, line := range strings.Split(view, "\n") {
+		maxWidth = max(maxWidth, lipgloss.Width(line))
+	}
+	return maxWidth
 }
