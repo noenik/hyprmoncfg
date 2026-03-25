@@ -20,6 +20,26 @@ hyprmoncfg --monitors-conf /path/to/monitors.conf --hypr-config /path/to/hyprlan
 
 ## Install
 
+### Arch Linux
+
+Stable release from AUR:
+
+```bash
+yay -S hyprmoncfg
+```
+
+Latest `main` from AUR:
+
+```bash
+yay -S hyprmoncfg-git
+```
+
+The package installs:
+
+- `hyprmoncfg` to launch the TUI or use the CLI
+- `hyprmoncfgd` for automatic profile switching
+- a user service unit at `/usr/lib/systemd/user/hyprmoncfgd.service`
+
 ### Build from source
 
 ```bash
@@ -70,6 +90,15 @@ hyprmoncfg apply desk --confirm-timeout 0
 ## Start the daemon
 
 The daemon watches for monitor changes and applies the best matching profile automatically. Set it up once and forget about it.
+
+If you installed from AUR:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now hyprmoncfgd
+```
+
+If you built from source and installed into `~/.local/bin`:
 
 ```bash
 mkdir -p ~/.config/systemd/user

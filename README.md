@@ -53,7 +53,19 @@ Both use the same apply engine: write `monitors.conf` atomically, reload Hyprlan
 
 ## Quick start
 
-Build:
+Arch Linux:
+
+```bash
+yay -S hyprmoncfg
+```
+
+For the latest `main` branch:
+
+```bash
+yay -S hyprmoncfg-git
+```
+
+Build from source:
 
 ```bash
 go build -o bin/hyprmoncfg ./cmd/hyprmoncfg
@@ -75,7 +87,14 @@ hyprmoncfg save desk       # save current layout as "desk"
 hyprmoncfg apply desk      # apply it later
 ```
 
-Start the daemon:
+Start the daemon after an AUR install:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now hyprmoncfgd
+```
+
+If you installed manually into `~/.local/bin`, copy the local unit first:
 
 ```bash
 mkdir -p ~/.config/systemd/user
