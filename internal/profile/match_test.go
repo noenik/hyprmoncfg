@@ -1,0 +1,42 @@
+package profile
+
+import (
+	"testing"
+
+	"github.com/crmne/hyprmoncfg/internal/hypr"
+)
+
+func TestBestMatchPrefersExactSet(t *testing.T) {
+	monitors := []hypr.Monitor{
+		{Name: "DP-1", Make: "Dell", Model: "U2720Q", Serial: "A1"},
+		{Name: "HDMI-A-1", Make: "LG", Model: "27GP850", Serial: "B2"},
+	}
+
+	exact := New("desk", []OutputConfig{
+		{Key: monitors[0].HardwareKey(), Enabled: true, Scale: 1, Width: 2560, Height: 1440},
+		{Key: monitors[1].HardwareKey(), Enabled: true, Scale: 1, Width: 2560, Height: 1440},
+	})
+	partial := New("single", []OutputConfig{
+		{Key: monitors[0].HardwareKey(), Enabled: true, Scale: 1, Width: 2560, Height: 1440},
+	})
+
+	picked, _, ok := BestMatch([]Profile{partial, exact}, monitors)
+	if !ok {
+		t.Fatalf("expected match")
+	}
+	if picked.Name != "desk" {
+		t.Fatalf("expected desk, got %s", picked.Name)
+	}
+}
+
+func TestMonitorSetHashIsStable(t *testing.T) {
+	m1 := hypr.Monitor{Name: "DP-1", Make: "Dell", Model: "U2720Q", Serial: "A1"}
+	m2 := hypr.Monitor{Name: "HDMI-A-1", Make: "LG", Model: "27GP850", Serial: "B2"}
+
+	h1 := MonitorSetHash([]hypr.Monitor{m1, m2})
+	h2 := MonitorSetHash([]hypr.Monitor{m2, m1})
+
+	if h1 != h2 {
+		t.Fatalf("expected stable hash, got %q vs %q", h1, h2)
+	}
+}

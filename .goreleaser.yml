@@ -1,0 +1,66 @@
+version: 2
+
+project_name: hyprmoncfg
+
+release:
+  github:
+    owner: crmne
+    name: hyprmoncfg
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: hyprmoncfg
+    main: ./cmd/hyprmoncfg
+    binary: hyprmoncfg
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X github.com/crmne/hyprmoncfg/internal/buildinfo.Version={{ .Version }} -X github.com/crmne/hyprmoncfg/internal/buildinfo.Commit={{ .Commit }} -X github.com/crmne/hyprmoncfg/internal/buildinfo.Date={{ .Date }}
+
+  - id: hyprmoncfgd
+    main: ./cmd/hyprmoncfgd
+    binary: hyprmoncfgd
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X github.com/crmne/hyprmoncfg/internal/buildinfo.Version={{ .Version }} -X github.com/crmne/hyprmoncfg/internal/buildinfo.Commit={{ .Commit }} -X github.com/crmne/hyprmoncfg/internal/buildinfo.Date={{ .Date }}
+
+archives:
+  - id: bundle
+    formats: [tar.gz]
+    ids:
+      - hyprmoncfg
+      - hyprmoncfgd
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+      - packaging/systemd/hyprmoncfgd.service
+      - packaging/systemd/hyprmoncfgd.local.service
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
