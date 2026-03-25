@@ -1,106 +1,81 @@
 # hyprmoncfg
 
-Terminal-first monitor configuration for Hyprland.
+**Hyprland monitor configuration that actually works.**
 
-`hyprmoncfg` ships two binaries:
+You know the drill. You plug in a monitor. Nothing happens the way you want. You open `hyprland.conf`, squint at coordinate math, guess at `monitor=` lines, reload, realize the positions are wrong, edit again. You go to a conference, plug into a projector, and start the whole dance over.
 
-- `hyprmoncfg`: TUI + CLI for monitor layout editing, profile management, and workspace planning
-- `hyprmoncfgd`: background daemon that auto-applies the best matching profile on monitor changes
+hyprmoncfg fixes this.
+
+Open a terminal. See your monitors laid out spatially. Drag them where you want. Save the layout as a profile. Next time you plug in the same monitors, the daemon applies it automatically.
+
+Two binaries. Zero runtime dependencies. Runs over SSH. No Python, no GTK, no D-Bus.
 
 ![hyprmoncfg layout editor](docs/assets/images/screenshots/layout.png)
 
-## Why it exists
+## The problem with Hyprland monitor configuration
 
-`hyprmoncfg` is aimed at the same general problem space as Monique, but with a different set of constraints:
+Configuring monitors in Hyprland is painful:
 
-- no Python runtime dependency
-- a terminal-first interface instead of GTK
-- one apply engine shared by both the interactive UI and the daemon
-- explicit verification that the chosen `monitors.conf` is actually sourced by Hyprland before writing it
+- **No visual editor.** You write `monitor=` lines by hand and pray the coordinates are right.
+- **No profiles.** Unplug your laptop from your desk, plug into a projector at a conference, and you're manually editing config files backstage.
+- **No automatic switching.** Hotplug a monitor and Hyprland does its best guess. Your careful layout? Gone.
+- **Connector names are unstable.** `DP-1` and `DP-2` swap randomly between boots. Workspace bindings break.
+- **Existing tools pull in the world.** Python runtimes, GTK libraries, GObject introspection. Just to move a rectangle on a screen.
+
+## The solution
+
+hyprmoncfg ships two binaries:
+
+| | |
+|---|---|
+| `hyprmoncfg` | TUI + CLI for layout editing, profile management, and workspace planning |
+| `hyprmoncfgd` | Background daemon that auto-applies the best matching profile on hotplug |
+
+Both use the same apply engine: write `monitors.conf` atomically, reload Hyprland, verify the result, revert if anything is wrong.
 
 ## Features
 
-- spatial monitor layout editor in the terminal
-- right-hand inspector for per-monitor properties
-- mode picker and typed numeric entry for scale and exact position
-- save, load, overwrite, and delete named profiles
-- workspace planner with `manual`, `sequential`, and `interleave` strategies
-- safe apply with confirm-or-revert support
-- automatic profile matching daemon with socket2 events and polling fallback
-- profile matching by hardware identity with connector-name fallback
+- **Spatial layout editor** -- drag monitors on a canvas, see them move in real time
+- **Per-monitor inspector** -- mode, scale, VRR, transform, exact position
+- **Named profiles** -- save "desk", "conference", "home-office", switch between them instantly
+- **Hardware-identity matching** -- profiles follow your monitors, not connector names
+- **Hotplug-aware daemon** -- plug in, walk away, the right profile is applied automatically
+- **Workspace planner** -- sequential, interleave, or manual workspace placement across monitors
+- **Safe apply with revert** -- a 10-second confirmation window so you never get locked out
+- **Source-chain verification** -- refuses to write a `monitors.conf` that Hyprland isn't even reading
+- **Zero runtime dependencies** -- compiled Go, statically linked, nothing to install
 
 ## Screenshots
 
-| Layout | Save Dialog |
+| Layout editor | Save dialog |
 | --- | --- |
 | ![Layout editor](docs/assets/images/screenshots/layout.png) | ![Save profile dialog](docs/assets/images/screenshots/save-profile.png) |
 
-## Build
+## Quick start
+
+Build:
 
 ```bash
 go build -o bin/hyprmoncfg ./cmd/hyprmoncfg
 go build -o bin/hyprmoncfgd ./cmd/hyprmoncfgd
 ```
 
-## Install locally
+Install:
 
 ```bash
-install -Dm755 bin/hyprmoncfg ~/.local/bin/hyprmoncfg
+install -Dm755 bin/hyprmoncfg  ~/.local/bin/hyprmoncfg
 install -Dm755 bin/hyprmoncfgd ~/.local/bin/hyprmoncfgd
 ```
 
-## CLI usage
+Use:
 
 ```bash
 hyprmoncfg                 # open the TUI
-hyprmoncfg monitors        # list current outputs
-hyprmoncfg profiles        # list saved profiles
-hyprmoncfg save desk       # save current state as profile "desk"
-hyprmoncfg apply desk      # apply a saved profile
-hyprmoncfg delete desk     # delete a saved profile
-hyprmoncfg version         # build metadata
+hyprmoncfg save desk       # save current layout as "desk"
+hyprmoncfg apply desk      # apply it later
 ```
 
-Useful flags:
-
-```bash
-hyprmoncfg --config-dir /path/to/config
-hyprmoncfg --monitors-conf /path/to/monitors.conf
-hyprmoncfg --hypr-config /path/to/hyprland.conf
-hyprmoncfg apply desk --confirm-timeout 0
-```
-
-## TUI controls
-
-Main controls:
-
-- `1`, `2`, `3`: switch tabs
-- `a`: apply current draft or selected profile
-- `s`: save current draft as a profile
-- `r`: reset from live Hyprland state
-- `q`: quit
-
-Layout tab:
-
-- drag monitors with the mouse
-- arrows move by `100px`
-- `Shift+arrows` move by `10px`
-- `Ctrl+arrows` move by `1px`
-- `Enter` opens pickers or typed numeric editors
-- `[` and `]` cycle selected monitor
-- `Tab` switches between canvas and inspector
-
-## Daemon
-
-```bash
-hyprmoncfgd
-hyprmoncfgd --profile desk
-hyprmoncfgd --debounce 1500ms --poll-interval 5s
-hyprmoncfgd --monitors-conf ~/.config/hypr/monitors.conf
-hyprmoncfgd --hypr-config ~/.config/hypr/hyprland.conf
-```
-
-Systemd user service for local installs:
+Start the daemon:
 
 ```bash
 mkdir -p ~/.config/systemd/user
@@ -109,64 +84,36 @@ systemctl --user daemon-reload
 systemctl --user enable --now hyprmoncfgd
 ```
 
-## How apply works
+## Dotfiles integration
 
-The apply engine used by both the TUI and the daemon does this:
+Profiles live in `~/.config/hyprmoncfg/profiles/`. They're plain JSON files, one per profile. Add the directory to your dotfile manager and your layouts roam across every machine you own.
 
-1. resolve the target `monitors.conf`
-2. verify that `hyprland.conf` actually sources that file
-3. write the new config atomically
-4. run `hyprctl reload`
-5. re-read monitor state and verify the result
-6. restore the previous file on revert or failed verification
-
-This avoids the common failure mode where a tool rewrites a config file that Hyprland is not even reading.
-
-## Configuration files
-
-Default profile storage:
-
-```text
-~/.config/hyprmoncfg/profiles/*.json
-```
-
-Default Hyprland targets:
-
-```text
-~/.config/hypr/monitors.conf
-~/.config/hypr/hyprland.conf
-```
-
-Profiles are stored as JSON because they are machine-owned state, not hand-authored configuration.
-
-## Packaging
-
-Arch recipes live in `packaging/arch`:
-
-- `packaging/arch/hyprmoncfg`
-- `packaging/arch/hyprmoncfg-git`
-
-## Docs site
-
-A Jekyll site using the VitePress-style theme lives in `docs/`.
-
-Local preview:
+With [chezmoi](https://www.chezmoi.io/):
 
 ```bash
-cd docs
-bundle install
-bundle exec jekyll serve --livereload
+chezmoi add ~/.config/hyprmoncfg
 ```
 
-GitHub Pages deployment is defined in `.github/workflows/docs.yml`.
+Now your desk at home, your laptop on the road, and your Raspberry Pi in the closet all share the same profile library. The daemon picks the right one based on what's actually plugged in.
 
-## Regenerate screenshots
+You don't commit `monitors.conf`. You commit your profiles. The tool writes `monitors.conf` for you.
 
-```bash
-./scripts/capture_screenshots.sh
-```
+## How it compares
 
-The script launches a dedicated terminal window, captures the TUI with `grim`, and writes the PNGs to `docs/assets/images/screenshots/`.
+| | hyprmoncfg | Monique | nwg-displays | kanshi |
+|---|---|---|---|---|
+| Interface | TUI | GTK4 GUI | GTK3 GUI | Config file |
+| Profiles | Yes | Yes | No | Yes |
+| Auto-switching daemon | Yes | Yes | No | Yes |
+| Workspace management | Yes | Yes | Basic | No |
+| Confirm/revert safety | Yes | Yes | No | No |
+| Runtime dependencies | None | Python + GTK4 | Python + GTK3 | None |
+| Works over SSH | Yes | No | No | N/A |
+| Source-chain verification | Yes | No | No | No |
+
+## Docs
+
+Full documentation at **[crmne.github.io/hyprmoncfg](https://crmne.github.io/hyprmoncfg/)**.
 
 ## Development
 
@@ -174,3 +121,13 @@ The script launches a dedicated terminal window, captures the TUI with `grim`, a
 go test ./...
 go vet ./...
 ```
+
+Regenerate screenshots:
+
+```bash
+./scripts/capture_screenshots.sh
+```
+
+## License
+
+MIT

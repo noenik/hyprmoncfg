@@ -1,0 +1,5 @@
+current: "0.1.0"
+items:
+  - title: Changelog
+    url: https://github.com/crmne/hyprmoncfg/releases
+    external: true
