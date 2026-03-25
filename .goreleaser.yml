@@ -48,6 +48,8 @@ archives:
     files:
       - README.md
       - LICENSE
+      - packaging/applications/hyprmoncfg.desktop
+      - packaging/icons/hyprmoncfg.svg
       - packaging/systemd/hyprmoncfgd.service
       - packaging/systemd/hyprmoncfgd.local.service
 
