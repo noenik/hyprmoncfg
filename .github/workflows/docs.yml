@@ -39,7 +39,7 @@ jobs:
 
       - name: Build site
         working-directory: docs
-        run: bundle exec jekyll build --baseurl "/hyprmoncfg" --destination ./_site
+        run: bundle exec jekyll build --destination ./_site
 
       - uses: actions/upload-pages-artifact@v3
         with:

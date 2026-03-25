@@ -2,7 +2,7 @@ title: hyprmoncfg
 description: Hyprland monitor configuration that actually works.
 lang: en-US
 timezone: Europe/Berlin
-url: https://crmne.github.io
+url: https://hyprmoncfg.dev
 baseurl: ""
 
 markdown: kramdown
