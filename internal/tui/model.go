@@ -116,6 +116,13 @@ type canvasCell struct {
 	bold bool
 }
 
+type canvasCardColors struct {
+	bg     string
+	border string
+	fg     string
+	muted  string
+}
+
 type snapEdge int
 
 const (
@@ -695,11 +702,11 @@ func (m Model) renderCanvasPane(width int, height int) string {
 		lipgloss.Left,
 		m.styles.label.Render("Legend"),
 		" ",
-		m.styles.badgeAccent.Render("Selected"),
+		renderCanvasLegendItem("Selected", canvasCardStyle(editableOutput{Enabled: true}, true)),
 		" ",
-		m.styles.badgeOn.Render("Enabled"),
+		renderCanvasLegendItem("Enabled", canvasCardStyle(editableOutput{Enabled: true}, false)),
 		" ",
-		m.styles.badgeOff.Render("Disabled"),
+		renderCanvasLegendItem("Disabled", canvasCardStyle(editableOutput{Enabled: false}, false)),
 	)
 	if showLegend {
 		lines = append(lines, "", legend)
@@ -1799,27 +1806,52 @@ func newCanvasCells(width, height int) [][]canvasCell {
 	return grid
 }
 
+func canvasCardStyle(output editableOutput, selected bool) canvasCardColors {
+	colors := canvasCardColors{
+		bg:     "#343946",
+		border: "#5E6575",
+		fg:     "#E9EDF5",
+		muted:  "#BAC2D0",
+	}
+	if !output.Enabled {
+		colors = canvasCardColors{
+			bg:     "#38282D",
+			border: "#735259",
+			fg:     "#E5D8DB",
+			muted:  "#C8B6BA",
+		}
+	}
+	if selected {
+		colors = canvasCardColors{
+			bg:     "#355C8A",
+			border: "#8EC5FF",
+			fg:     "#F8FBFF",
+			muted:  "#DDEAFF",
+		}
+	}
+	return colors
+}
+
+func renderCanvasLegendItem(label string, colors canvasCardColors) string {
+	border := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(colors.border)).
+		Bold(true).
+		Render("▍")
+	badge := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(colors.fg)).
+		Background(lipgloss.Color(colors.bg)).
+		Padding(0, 1).
+		Bold(true).
+		Render(label)
+	return border + badge
+}
+
 func paintMonitorCard(grid [][]canvasCell, rect canvasRect, output editableOutput, selected bool) {
 	if len(grid) == 0 || len(grid[0]) == 0 {
 		return
 	}
 
-	bg := "#343946"
-	border := "#5E6575"
-	fg := "#E9EDF5"
-	muted := "#BAC2D0"
-	if !output.Enabled {
-		bg = "#38282D"
-		border = "#735259"
-		fg = "#E5D8DB"
-		muted = "#C8B6BA"
-	}
-	if selected {
-		bg = "#355C8A"
-		border = "#8EC5FF"
-		fg = "#F8FBFF"
-		muted = "#DDEAFF"
-	}
+	colors := canvasCardStyle(output, selected)
 
 	x1 := clampInt(rect.x, 0, len(grid[0])-1)
 	y1 := clampInt(rect.y, 0, len(grid)-1)
@@ -1831,32 +1863,32 @@ func paintMonitorCard(grid [][]canvasCell, rect canvasRect, output editableOutpu
 
 	for y := y1; y <= y2; y++ {
 		for x := x1; x <= x2; x++ {
-			grid[y][x] = canvasCell{ch: ' ', fg: fg, bg: bg}
+			grid[y][x] = canvasCell{ch: ' ', fg: colors.fg, bg: colors.bg}
 		}
 	}
 
 	for x := x1 + 1; x < x2; x++ {
-		grid[y1][x] = canvasCell{ch: '─', fg: border, bg: bg, bold: selected}
-		grid[y2][x] = canvasCell{ch: '─', fg: border, bg: bg, bold: selected}
+		grid[y1][x] = canvasCell{ch: '─', fg: colors.border, bg: colors.bg, bold: selected}
+		grid[y2][x] = canvasCell{ch: '─', fg: colors.border, bg: colors.bg, bold: selected}
 	}
 	for y := y1 + 1; y < y2; y++ {
-		grid[y][x1] = canvasCell{ch: '│', fg: border, bg: bg, bold: selected}
-		grid[y][x2] = canvasCell{ch: '│', fg: border, bg: bg, bold: selected}
+		grid[y][x1] = canvasCell{ch: '│', fg: colors.border, bg: colors.bg, bold: selected}
+		grid[y][x2] = canvasCell{ch: '│', fg: colors.border, bg: colors.bg, bold: selected}
 	}
-	grid[y1][x1] = canvasCell{ch: '╭', fg: border, bg: bg, bold: selected}
-	grid[y1][x2] = canvasCell{ch: '╮', fg: border, bg: bg, bold: selected}
-	grid[y2][x1] = canvasCell{ch: '╰', fg: border, bg: bg, bold: selected}
-	grid[y2][x2] = canvasCell{ch: '╯', fg: border, bg: bg, bold: selected}
+	grid[y1][x1] = canvasCell{ch: '╭', fg: colors.border, bg: colors.bg, bold: selected}
+	grid[y1][x2] = canvasCell{ch: '╮', fg: colors.border, bg: colors.bg, bold: selected}
+	grid[y2][x1] = canvasCell{ch: '╰', fg: colors.border, bg: colors.bg, bold: selected}
+	grid[y2][x2] = canvasCell{ch: '╯', fg: colors.border, bg: colors.bg, bold: selected}
 
 	availableHeight := y2 - y1 - 1
-	lines := output.cardLines(max(1, availableHeight), fg, muted)
+	lines := output.cardLines(max(1, availableHeight), colors.fg, colors.muted)
 	startY := y1 + 1 + max(0, (availableHeight-len(lines))/2)
 	for idx, line := range lines {
 		y := startY + idx
 		if y <= y1 || y >= y2 {
 			continue
 		}
-		paintCanvasTextCentered(grid, x1+1, x2-1, y, fitString(line.text, x2-x1-1), line.fg, bg, line.bold)
+		paintCanvasTextCentered(grid, x1+1, x2-1, y, fitString(line.text, x2-x1-1), line.fg, colors.bg, line.bold)
 	}
 }
 

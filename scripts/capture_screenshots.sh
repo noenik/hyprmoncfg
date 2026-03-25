@@ -17,6 +17,8 @@ capture_margin_left="${CAPTURE_MARGIN_LEFT:-0}"
 capture_margin_right="${CAPTURE_MARGIN_RIGHT:-0}"
 capture_margin_top="${CAPTURE_MARGIN_TOP:-0}"
 capture_margin_bottom="${CAPTURE_MARGIN_BOTTOM:-0}"
+terminal_bg="${TERMINAL_BG:-0x111318}"
+terminal_fg="${TERMINAL_FG:-0xE7E9EE}"
 
 mkdir -p "$output_dir"
 
@@ -98,6 +100,8 @@ capture_state() {
     -o "window.opacity=1" \
     -o "window.padding.x=12" \
     -o "window.padding.y=10" \
+    -o "colors.primary.background='$terminal_bg'" \
+    -o "colors.primary.foreground='$terminal_fg'" \
     -e bash -lc "cd '$repo_root' && '$app_bin'" >/dev/null 2>&1 &
   local term_pid=$!
 
@@ -127,8 +131,8 @@ capture_state() {
   fi
   max_x=$((monitor_x + logical_monitor_w - target_w))
   max_y=$((monitor_y + logical_monitor_h - target_h))
-  target_x="$window_x"
-  target_y="$window_y"
+  target_x=$((monitor_x + window_x))
+  target_y=$((monitor_y + window_y))
   if (( target_x < monitor_x )); then
     target_x="$monitor_x"
   fi

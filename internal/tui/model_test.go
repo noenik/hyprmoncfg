@@ -53,6 +53,33 @@ func TestRenderMainIncludesRefreshedChrome(t *testing.T) {
 	}
 }
 
+func TestCanvasLegendMatchesCanvasCardColors(t *testing.T) {
+	m := Model{
+		styles: newStyles(),
+		tab:    tabLayout,
+		editOutputs: []editableOutput{{
+			Name:    "DP-1",
+			Enabled: true,
+			Width:   3840,
+			Height:  2160,
+			Scale:   1,
+		}},
+	}
+
+	view := m.renderCanvasPane(80, 12)
+
+	expected := []string{
+		renderCanvasLegendItem("Selected", canvasCardStyle(editableOutput{Enabled: true}, true)),
+		renderCanvasLegendItem("Enabled", canvasCardStyle(editableOutput{Enabled: true}, false)),
+		renderCanvasLegendItem("Disabled", canvasCardStyle(editableOutput{Enabled: false}, false)),
+	}
+	for _, item := range expected {
+		if !strings.Contains(view, item) {
+			t.Fatalf("expected legend to include canvas-matched item %q, got:\n%s", item, view)
+		}
+	}
+}
+
 func TestActivateInspectorFieldOpensEditors(t *testing.T) {
 	base := Model{
 		styles:      newStyles(),
