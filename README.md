@@ -134,7 +134,7 @@ You don't commit `monitors.conf`. You commit your profiles. The tool writes `mon
 
 ## Docs
 
-Full documentation at **[crmne.github.io/hyprmoncfg](https://crmne.github.io/hyprmoncfg/)**.
+Full documentation at **[hyprmoncfg.dev](https://hyprmoncfg.dev)**.
 
 ## Development
 
