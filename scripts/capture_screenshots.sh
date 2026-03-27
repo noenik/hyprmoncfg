@@ -17,6 +17,7 @@ capture_margin_left="${CAPTURE_MARGIN_LEFT:-0}"
 capture_margin_right="${CAPTURE_MARGIN_RIGHT:-0}"
 capture_margin_top="${CAPTURE_MARGIN_TOP:-0}"
 capture_margin_bottom="${CAPTURE_MARGIN_BOTTOM:-0}"
+terminal_override_colors="${TERMINAL_OVERRIDE_COLORS:-1}"
 terminal_bg="${TERMINAL_BG:-0x111318}"
 terminal_fg="${TERMINAL_FG:-0xE7E9EE}"
 
@@ -90,18 +91,25 @@ capture_state() {
   local key_action="${2:-}"
   local title="hyprmoncfg-shot-$name"
   local screenshot="$output_dir/$name.png"
+  local terminal_args=(
+    --title "$title"
+    --class "$window_class,$window_class"
+    -o "window.dimensions.columns=$terminal_columns"
+    -o "window.dimensions.lines=$terminal_lines"
+    -o "font.size=14"
+    -o "window.opacity=1"
+    -o "window.padding.x=12"
+    -o "window.padding.y=10"
+  )
+  if [[ "$terminal_override_colors" != "0" ]]; then
+    terminal_args+=(
+      -o "colors.primary.background='$terminal_bg'"
+      -o "colors.primary.foreground='$terminal_fg'"
+    )
+  fi
 
   env -u NO_COLOR COLORTERM=truecolor TERM=xterm-256color "$terminal_bin" \
-    --title "$title" \
-    --class "$window_class,$window_class" \
-    -o "window.dimensions.columns=$terminal_columns" \
-    -o "window.dimensions.lines=$terminal_lines" \
-    -o "font.size=14" \
-    -o "window.opacity=1" \
-    -o "window.padding.x=12" \
-    -o "window.padding.y=10" \
-    -o "colors.primary.background='$terminal_bg'" \
-    -o "colors.primary.foreground='$terminal_fg'" \
+    "${terminal_args[@]}" \
     -e bash -lc "cd '$repo_root' && '$app_bin'" >/dev/null 2>&1 &
   local term_pid=$!
 
