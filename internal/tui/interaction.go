@@ -305,7 +305,7 @@ func (m *Model) openSaveDialog() (tea.Model, tea.Cmd) {
 	delegate.Styles.NormalTitle = m.styles.value
 	delegate.Styles.NormalDesc = m.styles.subtle
 	delegate.Styles.SelectedTitle = m.styles.focused.Copy().UnsetPadding()
-	delegate.Styles.SelectedDesc = m.styles.subtle.Copy().Foreground(lipgloss.Color("#DDEAFF"))
+	delegate.Styles.SelectedDesc = m.styles.selectedDesc
 	delegate.Styles.DimmedTitle = m.styles.subtle
 	delegate.Styles.DimmedDesc = m.styles.subtle
 	delegate.Styles.FilterMatch = m.styles.badgeAccent
@@ -584,6 +584,12 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if tab, ok := m.tabAt(msg.X, msg.Y); ok && msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
 		m.tab = tab
 		return m, nil
+	}
+
+	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
+		if link, ok := m.footerLinkAt(msg.X, msg.Y); ok {
+			return m, m.openURLCmd(link.label, link.url)
+		}
 	}
 
 	switch m.tab {

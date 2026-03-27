@@ -1,12 +1,14 @@
 package tui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/crmne/hyprmoncfg/internal/buildinfo"
 	"github.com/crmne/hyprmoncfg/internal/profile"
 )
 
@@ -53,6 +55,161 @@ func TestRenderMainIncludesRefreshedChrome(t *testing.T) {
 	}
 }
 
+func TestRenderMainShowsFooterProjectLinks(t *testing.T) {
+	prevVersion := buildinfo.Version
+	buildinfo.Version = "1.2.3"
+	defer func() { buildinfo.Version = prevVersion }()
+
+	m := Model{
+		styles:      newStyles(),
+		mode:        modeMain,
+		tab:         tabLayout,
+		layoutFocus: layoutFocusInspector,
+		width:       120,
+		height:      30,
+		editOutputs: []editableOutput{{
+			Key:       "microstep|mpg321ur-qd",
+			Name:      "DP-1",
+			Enabled:   true,
+			Modes:     []string{"3840x2160@143.99Hz"},
+			ModeIndex: 0,
+			Width:     3840,
+			Height:    2160,
+			Refresh:   143.99,
+			Scale:     1,
+		}},
+	}
+
+	view := m.renderMain()
+	for _, want := range []string{"Issues", "Donate", "v1.2.3", sponsorURL, communityURL} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("expected footer to include %q, got:\n%s", want, view)
+		}
+	}
+}
+
+func TestRenderFooterInfoIncludesVersion(t *testing.T) {
+	prevVersion := buildinfo.Version
+	buildinfo.Version = "1.2.3"
+	defer func() { buildinfo.Version = prevVersion }()
+
+	m := Model{styles: newStyles(), width: 120}
+	info := m.renderFooterInfo(118)
+	for _, want := range []string{"Issues", "Donate", "v1.2.3"} {
+		if !strings.Contains(info, want) {
+			t.Fatalf("expected footer info to include %q, got %q", want, info)
+		}
+	}
+}
+
+func TestRenderFooterBarFitsVersionWithinLineWidth(t *testing.T) {
+	prevVersion := buildinfo.Version
+	buildinfo.Version = "1.2.3"
+	defer func() { buildinfo.Version = prevVersion }()
+
+	m := Model{styles: newStyles(), width: 120}
+	bar := m.renderFooterBar()
+	if !strings.Contains(bar, "v1.2.3") {
+		t.Fatalf("expected footer bar to include version, got %q", bar)
+	}
+	if width := lipgloss.Width(bar); width > 118 {
+		t.Fatalf("expected footer bar to fit width 118, got %d", width)
+	}
+}
+
+func TestRenderFooterInfoCollapsesToVersionOnNarrowWidth(t *testing.T) {
+	prevVersion := buildinfo.Version
+	buildinfo.Version = "1.2.3"
+	defer func() { buildinfo.Version = prevVersion }()
+
+	m := Model{styles: newStyles(), width: 32}
+
+	info := m.renderFooterInfo(m.footerContentWidth())
+	if info != "v1.2.3" {
+		t.Fatalf("expected narrow footer info to collapse to version, got %q", info)
+	}
+}
+
+func TestFooterLinkAtReturnsClickableRegionsOnly(t *testing.T) {
+	prevVersion := buildinfo.Version
+	buildinfo.Version = "1.2.3"
+	defer func() { buildinfo.Version = prevVersion }()
+
+	m := Model{styles: newStyles(), width: 120, height: 24}
+	layout := m.footerLayout()
+	if len(layout.links) != 2 {
+		t.Fatalf("expected 2 clickable footer links, got %+v", layout.links)
+	}
+
+	issuesX := m.footerColumnX() + layout.links[0].start
+	link, ok := m.footerLinkAt(issuesX, m.footerRowY())
+	if !ok || link.label != "Issues" || link.url != communityURL {
+		t.Fatalf("expected Issues hit, got ok=%v link=%+v", ok, link)
+	}
+
+	versionX := m.footerColumnX() + strings.LastIndex(layout.text, "v1.2.3")
+	if _, ok := m.footerLinkAt(versionX, m.footerRowY()); ok {
+		t.Fatal("expected version label to remain non-clickable")
+	}
+}
+
+func TestFooterClickRunsBrowserOpenCommand(t *testing.T) {
+	prevVersion := buildinfo.Version
+	buildinfo.Version = "1.2.3"
+	defer func() { buildinfo.Version = prevVersion }()
+
+	var opened string
+	m := Model{
+		styles:  newStyles(),
+		width:   120,
+		height:  24,
+		tab:     tabLayout,
+		openURL: func(url string) error { opened = url; return nil },
+	}
+
+	layout := m.footerLayout()
+	donate := layout.links[1]
+	msg := tea.MouseMsg{
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonLeft,
+		X:      m.footerColumnX() + donate.start,
+		Y:      m.footerRowY(),
+	}
+
+	nextModel, cmd := m.updateMouse(msg)
+	if cmd == nil {
+		t.Fatal("expected footer click to return open-url command")
+	}
+
+	result := cmd()
+	openMsg, ok := result.(openURLMsg)
+	if !ok {
+		t.Fatalf("expected openURLMsg, got %T", result)
+	}
+	if opened != sponsorURL {
+		t.Fatalf("expected donate click to open %q, got %q", sponsorURL, opened)
+	}
+
+	updated, _ := nextModel.(Model).Update(openMsg)
+	got := updated.(Model)
+	if got.status != "Opened Donate in browser" || got.statusErr {
+		t.Fatalf("expected success status after opening link, got status=%q err=%v", got.status, got.statusErr)
+	}
+}
+
+func TestOpenURLMsgSetsErrorStatus(t *testing.T) {
+	m := Model{styles: newStyles()}
+
+	updated, _ := m.Update(openURLMsg{label: "Issues", url: communityURL, err: errors.New("boom")})
+	got := updated.(Model)
+	if !got.statusErr {
+		t.Fatal("expected failed open-url status to be marked as error")
+	}
+	if !strings.Contains(got.status, "Failed to open Issues link") {
+		t.Fatalf("expected open-url failure in status, got %q", got.status)
+	}
+}
+
 func TestCanvasLegendMatchesCanvasCardColors(t *testing.T) {
 	m := Model{
 		styles: newStyles(),
@@ -69,9 +226,9 @@ func TestCanvasLegendMatchesCanvasCardColors(t *testing.T) {
 	view := m.renderCanvasPane(80, 12)
 
 	expected := []string{
-		renderCanvasLegendItem("Selected", canvasCardStyle(editableOutput{Enabled: true}, true)),
-		renderCanvasLegendItem("Enabled", canvasCardStyle(editableOutput{Enabled: true}, false)),
-		renderCanvasLegendItem("Disabled", canvasCardStyle(editableOutput{Enabled: false}, false)),
+		renderCanvasLegendItem("Selected", m.canvasCardStyle(editableOutput{Enabled: true}, true)),
+		renderCanvasLegendItem("Enabled", m.canvasCardStyle(editableOutput{Enabled: true}, false)),
+		renderCanvasLegendItem("Disabled", m.canvasCardStyle(editableOutput{Enabled: false}, false)),
 	}
 	for _, item := range expected {
 		if !strings.Contains(view, item) {

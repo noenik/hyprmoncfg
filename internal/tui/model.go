@@ -71,6 +71,12 @@ type revertMsg struct {
 	reason string
 }
 
+type openURLMsg struct {
+	label string
+	url   string
+	err   error
+}
+
 type clearSnapMsg struct {
 	token int
 }
@@ -165,9 +171,10 @@ type workspaceEditor struct {
 }
 
 type Model struct {
-	client *hypr.Client
-	store  *profile.Store
-	engine apply.Engine
+	client  *hypr.Client
+	store   *profile.Store
+	engine  apply.Engine
+	openURL func(string) error
 
 	styles styles
 
@@ -213,6 +220,7 @@ func NewModel(client *hypr.Client, store *profile.Store, monitorsConfPath string
 			MonitorsConfPath:   monitorsConfPath,
 			HyprlandConfigPath: hyprlandConfigPath,
 		},
+		openURL:     openExternalURL,
 		styles:      newStyles(),
 		mode:        modeMain,
 		tab:         tabLayout,
@@ -319,6 +327,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.markClean()
 		m.setStatusOK("Configuration reverted: " + msg.reason)
 		return m, m.refreshCmd()
+
+	case openURLMsg:
+		if msg.err != nil {
+			m.setStatusErr(fmt.Sprintf("Failed to open %s link: %v", msg.label, msg.err))
+			return m, nil
+		}
+		m.setStatusOK(fmt.Sprintf("Opened %s in browser", msg.label))
+		return m, nil
 
 	case tickMsg:
 		if m.mode == modeConfirm && m.pending != nil {
@@ -593,19 +609,9 @@ func (m Model) renderMain() string {
 	title := m.renderTitleBar()
 	tabs := m.renderTabs()
 
-	var help string
-	switch m.tab {
-	case tabLayout:
-		help = "mouse drag monitors | arrows move 100px | Shift+arrows move 10px | Ctrl+arrows move 1px | Enter opens pickers | [ ] cycle | Tab switches panes | a apply | s save | r reset"
-	case tabProfiles:
-		help = "mouse click selects profiles | Enter loads into the draft editor | a apply selected | d delete | s save current draft"
-	case tabWorkspaces:
-		help = "click to focus fields and monitor order | left/right adjust | [ ] order select | u/n reorder | a apply | s save"
-	}
-
 	status := m.renderStatus()
-	helpText := m.styles.help.MaxWidth(max(20, m.terminalWidth()-2)).Render(help)
-	bodyHeight := m.mainBodyHeight(title, tabs, status, helpText)
+	footerText := m.renderFooterBar()
+	bodyHeight := m.mainBodyHeight(title, tabs, status, footerText)
 
 	var body string
 	switch m.tab {
@@ -625,13 +631,14 @@ func (m Model) renderMain() string {
 		body,
 		"",
 		status,
-		helpText,
+		footerText,
 	}, "\n")
 	app := m.styles.app
-	return app.Width(max(1, m.terminalWidth()-app.GetHorizontalFrameSize())).
+	rendered := app.Width(max(1, m.terminalWidth()-app.GetHorizontalFrameSize())).
 		Height(max(1, m.terminalHeight()-app.GetVerticalFrameSize())).
 		MaxHeight(max(1, m.terminalHeight()-app.GetVerticalFrameSize())).
 		Render(content)
+	return m.decorateFooterBar(rendered, footerText)
 }
 
 func (m Model) renderTabs() string {
@@ -702,11 +709,11 @@ func (m Model) renderCanvasPane(width int, height int) string {
 		lipgloss.Left,
 		m.styles.label.Render("Legend"),
 		" ",
-		renderCanvasLegendItem("Selected", canvasCardStyle(editableOutput{Enabled: true}, true)),
+		renderCanvasLegendItem("Selected", m.canvasCardStyle(editableOutput{Enabled: true}, true)),
 		" ",
-		renderCanvasLegendItem("Enabled", canvasCardStyle(editableOutput{Enabled: true}, false)),
+		renderCanvasLegendItem("Enabled", m.canvasCardStyle(editableOutput{Enabled: true}, false)),
 		" ",
-		renderCanvasLegendItem("Disabled", canvasCardStyle(editableOutput{Enabled: false}, false)),
+		renderCanvasLegendItem("Disabled", m.canvasCardStyle(editableOutput{Enabled: false}, false)),
 	)
 	if showLegend {
 		lines = append(lines, "", legend)
@@ -738,7 +745,7 @@ func (m Model) renderCanvas(width, height int) string {
 	canvasW := layout.width
 	canvasH := layout.height
 
-	grid := newCanvasCells(canvasW, canvasH)
+	grid := m.newCanvasCells(canvasW, canvasH)
 
 	rects := append([]canvasRect(nil), layout.rects...)
 	sort.SliceStable(rects, func(i, j int) bool {
@@ -754,13 +761,13 @@ func (m Model) renderCanvas(width, height int) string {
 	for _, rect := range rects {
 		output := m.editOutputs[rect.index]
 		selected := rect.index == m.selectedOutput
-		paintMonitorCard(grid, rect, output, selected)
+		paintMonitorCard(grid, rect, output, selected, m.canvasCardStyle(output, selected))
 	}
 	if m.snap != nil {
 		for _, mark := range m.snap.Marks {
 			for _, rect := range layout.rects {
 				if rect.index == mark.OutputIndex {
-					paintSnapMark(grid, rect, mark.Edge)
+					paintSnapMark(grid, rect, mark.Edge, m.styles.palette.snapHighlight)
 				}
 			}
 		}
@@ -1782,22 +1789,23 @@ func (o editableOutput) cardLines(maxLines int, fg string, muted string) []cardL
 	}
 }
 
-func newCanvasCells(width, height int) [][]canvasCell {
+func (m Model) newCanvasCells(width, height int) [][]canvasCell {
 	grid := make([][]canvasCell, height)
+	p := m.styles.palette
 	for y := 0; y < height; y++ {
 		row := make([]canvasCell, width)
 		for x := 0; x < width; x++ {
-			cell := canvasCell{ch: ' ', fg: "#2A2F3A", bg: "#16181D"}
+			cell := canvasCell{ch: ' ', fg: p.canvasGrid, bg: p.canvasBg}
 			switch {
 			case y%4 == 0 && x%8 == 0:
 				cell.ch = '┼'
-				cell.fg = "#242936"
+				cell.fg = p.canvasAxis
 			case y%4 == 0:
 				cell.ch = '─'
-				cell.fg = "#202532"
+				cell.fg = p.canvasGrid
 			case x%8 == 0:
 				cell.ch = '│'
-				cell.fg = "#202532"
+				cell.fg = p.canvasGrid
 			}
 			row[x] = cell
 		}
@@ -1806,27 +1814,28 @@ func newCanvasCells(width, height int) [][]canvasCell {
 	return grid
 }
 
-func canvasCardStyle(output editableOutput, selected bool) canvasCardColors {
+func (m Model) canvasCardStyle(output editableOutput, selected bool) canvasCardColors {
+	p := m.styles.palette
 	colors := canvasCardColors{
-		bg:     "#343946",
-		border: "#5E6575",
-		fg:     "#E9EDF5",
-		muted:  "#BAC2D0",
+		bg:     p.cardBg,
+		border: p.cardBorder,
+		fg:     p.cardFg,
+		muted:  p.cardMuted,
 	}
 	if !output.Enabled {
 		colors = canvasCardColors{
-			bg:     "#38282D",
-			border: "#735259",
-			fg:     "#E5D8DB",
-			muted:  "#C8B6BA",
+			bg:     p.cardDisabledBg,
+			border: p.cardDisabledBorder,
+			fg:     p.cardDisabledFg,
+			muted:  p.cardDisabledMuted,
 		}
 	}
 	if selected {
 		colors = canvasCardColors{
-			bg:     "#355C8A",
-			border: "#8EC5FF",
-			fg:     "#F8FBFF",
-			muted:  "#DDEAFF",
+			bg:     p.cardSelectedBg,
+			border: p.cardSelectedBorder,
+			fg:     p.cardSelectedFg,
+			muted:  p.cardSelectedMuted,
 		}
 	}
 	return colors
@@ -1837,21 +1846,21 @@ func renderCanvasLegendItem(label string, colors canvasCardColors) string {
 		Foreground(lipgloss.Color(colors.border)).
 		Bold(true).
 		Render("▍")
-	badge := lipgloss.NewStyle().
+	badgeStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(colors.fg)).
-		Background(lipgloss.Color(colors.bg)).
 		Padding(0, 1).
-		Bold(true).
-		Render(label)
+		Bold(true)
+	if colors.bg != "" {
+		badgeStyle = badgeStyle.Background(lipgloss.Color(colors.bg))
+	}
+	badge := badgeStyle.Render(label)
 	return border + badge
 }
 
-func paintMonitorCard(grid [][]canvasCell, rect canvasRect, output editableOutput, selected bool) {
+func paintMonitorCard(grid [][]canvasCell, rect canvasRect, output editableOutput, selected bool, colors canvasCardColors) {
 	if len(grid) == 0 || len(grid[0]) == 0 {
 		return
 	}
-
-	colors := canvasCardStyle(output, selected)
 
 	x1 := clampInt(rect.x, 0, len(grid[0])-1)
 	y1 := clampInt(rect.y, 0, len(grid)-1)
@@ -1911,7 +1920,7 @@ func paintCanvasTextCentered(grid [][]canvasCell, left, right, y int, text strin
 	}
 }
 
-func paintSnapMark(grid [][]canvasCell, rect canvasRect, edge snapEdge) {
+func paintSnapMark(grid [][]canvasCell, rect canvasRect, edge snapEdge, highlight string) {
 	if len(grid) == 0 || len(grid[0]) == 0 {
 		return
 	}
@@ -1920,8 +1929,6 @@ func paintSnapMark(grid [][]canvasCell, rect canvasRect, edge snapEdge) {
 	y1 := clampInt(rect.y, 0, len(grid)-1)
 	x2 := clampInt(rect.x+rect.w-1, 0, len(grid[0])-1)
 	y2 := clampInt(rect.y+rect.h-1, 0, len(grid)-1)
-	highlight := "#F5C86A"
-
 	switch edge {
 	case snapEdgeLeft:
 		for y := y1; y <= y2; y++ {
