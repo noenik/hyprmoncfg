@@ -19,6 +19,33 @@
   border-radius: 12px;
 }
 
+.VPHero.has-image .image {
+  justify-content: center;
+}
+
+.VPHero.has-image .image-container {
+  margin: 0 auto;
+}
+
+.VPHero .image-src {
+  display: block;
+  margin: 0 auto;
+}
+
+@media (max-width: 960px) {
+  .VPHero .image-src {
+    width: 106%;
+    max-width: 106%;
+  }
+}
+
+@media (min-width: 961px) {
+  .VPHero .image-src {
+    width: 112%;
+    max-width: 112%;
+  }
+}
+
 .VPFooter .footer-built-with {
   display: block;
   margin-top: 12px;
