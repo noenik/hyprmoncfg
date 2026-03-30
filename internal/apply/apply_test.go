@@ -149,3 +149,156 @@ func TestRenderHyprlandConfigUsesMonitorV2WithWorkspaceRules(t *testing.T) {
 		}
 	}
 }
+
+func TestCommandsForProfileMirror(t *testing.T) {
+	primary := hypr.Monitor{Name: "DP-1", Make: "Dell", Model: "U2720Q", Serial: "A1"}
+	secondary := hypr.Monitor{Name: "HDMI-A-1", Make: "LG", Model: "27GP850", Serial: "B2"}
+	p := profile.New("mirror", []profile.OutputConfig{
+		{
+			Key:     primary.HardwareKey(),
+			Name:    "DP-1",
+			Enabled: true,
+			Width:   2560,
+			Height:  1440,
+			Refresh: 144,
+			Scale:   1,
+		},
+		{
+			Key:      secondary.HardwareKey(),
+			Name:     "HDMI-A-1",
+			Enabled:  true,
+			MirrorOf: primary.HardwareKey(),
+		},
+	})
+
+	cmds, err := CommandsForProfile(p, []hypr.Monitor{primary, secondary})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cmds) != 2 {
+		t.Fatalf("expected 2 commands, got %d: %v", len(cmds), cmds)
+	}
+	if !strings.Contains(cmds[1], "mirror,DP-1") {
+		t.Fatalf("expected mirror command targeting DP-1, got: %s", cmds[1])
+	}
+}
+
+func TestRenderHyprlandConfigMirrorV1(t *testing.T) {
+	primary := hypr.Monitor{Name: "DP-1", Description: "Dell U2720Q", Make: "Dell", Model: "U2720Q", Serial: "A1"}
+	secondary := hypr.Monitor{Name: "HDMI-A-1", Description: "LG 27GP850", Make: "LG", Model: "27GP850", Serial: "B2"}
+	p := profile.New("mirror", []profile.OutputConfig{
+		{
+			Key:     primary.HardwareKey(),
+			Name:    "DP-1",
+			Enabled: true,
+			Width:   2560,
+			Height:  1440,
+			Refresh: 144,
+			Scale:   1,
+		},
+		{
+			Key:      secondary.HardwareKey(),
+			Name:     "HDMI-A-1",
+			Enabled:  true,
+			MirrorOf: primary.HardwareKey(),
+		},
+	})
+
+	rendered, err := RenderHyprlandConfig(p, []hypr.Monitor{primary, secondary}, false)
+	if err != nil {
+		t.Fatalf("unexpected render error: %v", err)
+	}
+	if !strings.Contains(rendered, "mirror,desc:Dell U2720Q") {
+		t.Fatalf("expected v1 mirror line with desc: selector, got:\n%s", rendered)
+	}
+}
+
+func TestRenderHyprlandConfigMirrorV2(t *testing.T) {
+	primary := hypr.Monitor{Name: "DP-1", Description: "Dell U2720Q", Make: "Dell", Model: "U2720Q", Serial: "A1"}
+	secondary := hypr.Monitor{Name: "HDMI-A-1", Description: "LG 27GP850", Make: "LG", Model: "27GP850", Serial: "B2"}
+	p := profile.New("mirror", []profile.OutputConfig{
+		{
+			Key:     primary.HardwareKey(),
+			Name:    "DP-1",
+			Enabled: true,
+			Width:   2560,
+			Height:  1440,
+			Refresh: 144,
+			Scale:   1,
+		},
+		{
+			Key:      secondary.HardwareKey(),
+			Name:     "HDMI-A-1",
+			Enabled:  true,
+			MirrorOf: primary.HardwareKey(),
+		},
+	})
+
+	rendered, err := RenderHyprlandConfig(p, []hypr.Monitor{primary, secondary}, true)
+	if err != nil {
+		t.Fatalf("unexpected render error: %v", err)
+	}
+	if !strings.Contains(rendered, "mirror = desc:Dell U2720Q") {
+		t.Fatalf("expected v2 mirror block, got:\n%s", rendered)
+	}
+	// The mirror block should contain only output + mirror, not mode/position/scale.
+	mirrorIdx := strings.Index(rendered, "desc:LG 27GP850")
+	if mirrorIdx < 0 {
+		t.Fatalf("mirror monitor block not found in:\n%s", rendered)
+	}
+	mirrorBlock := rendered[mirrorIdx:]
+	endIdx := strings.Index(mirrorBlock, "}")
+	if endIdx >= 0 {
+		mirrorBlock = mirrorBlock[:endIdx]
+	}
+	for _, forbidden := range []string{"position", "mode", "scale"} {
+		if strings.Contains(mirrorBlock, forbidden) {
+			t.Fatalf("mirror v2 block should not contain %q, got:\n%s", forbidden, rendered)
+		}
+	}
+}
+
+func TestValidateLayoutSkipsMirroredMonitors(t *testing.T) {
+	outputs := []profile.OutputConfig{
+		{
+			Key:     "primary",
+			Name:    "DP-1",
+			Enabled: true,
+			Width:   2560,
+			Height:  1440,
+			X:       0,
+			Y:       0,
+			Scale:   1,
+		},
+		{
+			Key:      "secondary",
+			Name:     "HDMI-A-1",
+			Enabled:  true,
+			Width:    2560,
+			Height:   1440,
+			X:        0,
+			Y:        0,
+			Scale:    1,
+			MirrorOf: "primary",
+		},
+	}
+
+	if err := ValidateLayout(outputs); err != nil {
+		t.Fatalf("mirrored monitor should not trigger overlap: %v", err)
+	}
+}
+
+func TestSnapshotCommandsMirror(t *testing.T) {
+	monitors := []hypr.Monitor{
+		{Name: "DP-1", Width: 2560, Height: 1440, RefreshRate: 144, Scale: 1},
+		{Name: "HDMI-A-1", Width: 2560, Height: 1440, MirrorOf: "DP-1", Scale: 1},
+	}
+
+	cmds := SnapshotCommands(monitors)
+	if len(cmds) != 2 {
+		t.Fatalf("expected 2 commands, got %d: %v", len(cmds), cmds)
+	}
+	if !strings.Contains(cmds[1], "mirror,DP-1") {
+		t.Fatalf("expected snapshot mirror command, got: %s", cmds[1])
+	}
+}

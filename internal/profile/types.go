@@ -25,6 +25,7 @@ type OutputConfig struct {
 	Scale     float64 `json:"scale"`
 	VRR       int     `json:"vrr,omitempty"`
 	Transform int     `json:"transform"`
+	MirrorOf  string  `json:"mirror_of,omitempty"`
 }
 
 type WorkspaceStrategy string
@@ -77,8 +78,17 @@ func FromMonitors(name string, monitors []hypr.Monitor) Profile {
 }
 
 func FromState(name string, monitors []hypr.Monitor, rules []hypr.WorkspaceRule) Profile {
+	nameToKey := make(map[string]string, len(monitors))
+	for _, m := range monitors {
+		nameToKey[m.Name] = m.HardwareKey()
+	}
+
 	outputs := make([]OutputConfig, 0, len(monitors))
 	for _, m := range monitors {
+		mirrorOf := ""
+		if m.MirrorOf != "" {
+			mirrorOf = nameToKey[m.MirrorOf]
+		}
 		outputs = append(outputs, OutputConfig{
 			Key:       m.HardwareKey(),
 			Name:      m.Name,
@@ -95,6 +105,7 @@ func FromState(name string, monitors []hypr.Monitor, rules []hypr.WorkspaceRule)
 			Scale:     m.Scale,
 			VRR:       boolToVRR(m.VRR),
 			Transform: m.Transform,
+			MirrorOf:  mirrorOf,
 		})
 	}
 	p := New(name, outputs)

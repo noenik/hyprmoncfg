@@ -1085,6 +1085,7 @@ func (m Model) compactInspectorFieldLines(output editableOutput, innerWidth int)
 				m.inspectorCompactFieldToken("X", 5, output),
 				m.inspectorCompactFieldToken("Y", 6, output),
 			),
+			m.inspectorCompactFieldLine("Mirror", 7, output),
 		}
 	case innerWidth >= 36:
 		return []string{
@@ -1101,6 +1102,7 @@ func (m Model) compactInspectorFieldLines(output editableOutput, innerWidth int)
 				m.inspectorCompactFieldToken("X", 5, output),
 				m.inspectorCompactFieldToken("Y", 6, output),
 			),
+			m.inspectorCompactFieldLine("Mirror", 7, output),
 		}
 	default:
 		return []string{
@@ -1115,6 +1117,7 @@ func (m Model) compactInspectorFieldLines(output editableOutput, innerWidth int)
 				m.inspectorCompactFieldToken("X", 5, output),
 				m.inspectorCompactFieldToken("Y", 6, output),
 			),
+			m.inspectorCompactFieldLine("Mirror", 7, output),
 		}
 	}
 }
@@ -1138,7 +1141,6 @@ func (m Model) inspectorDetailLines(output editableOutput) []string {
 		fmt.Sprintf("%s %s", m.styles.label.Render("Layout px "), m.styles.value.Render(output.layoutSizeLabel())),
 		fmt.Sprintf("%s %s", m.styles.label.Render("Model     "), m.styles.value.Render(output.displayModelLabel())),
 		fmt.Sprintf("%s %s", m.styles.label.Render("Serial    "), m.styles.value.Render(blankFallback(strings.TrimSpace(output.Serial), "(none)"))),
-		fmt.Sprintf("%s %s", m.styles.label.Render("Mirror    "), m.styles.value.Render(blankFallback(blankMirror(output.MirrorOf), "none"))),
 		fmt.Sprintf("%s %s", m.styles.label.Render("DPMS      "), m.styles.value.Render(boolText(output.DPMSStatus))),
 		fmt.Sprintf("%s %s", m.styles.label.Render("Focused   "), m.styles.value.Render(boolText(output.Focused))),
 	}
@@ -1180,8 +1182,18 @@ func (m *Model) loadLiveState() {
 		selectedKey = prevOutputs[m.selectedOutput].Key
 	}
 	m.editOutputs = make([]editableOutput, 0, len(m.monitors))
+	nameToKey := make(map[string]string, len(m.monitors))
 	for _, monitor := range m.monitors {
-		m.editOutputs = append(m.editOutputs, editableOutputFromMonitor(monitor))
+		nameToKey[monitor.Name] = monitor.HardwareKey()
+	}
+	for _, monitor := range m.monitors {
+		output := editableOutputFromMonitor(monitor)
+		if output.MirrorOf != "" {
+			if key, ok := nameToKey[output.MirrorOf]; ok {
+				output.MirrorOf = key
+			}
+		}
+		m.editOutputs = append(m.editOutputs, output)
 	}
 
 	settings := profile.WorkspaceSettingsFromHypr(m.monitors, m.workspaceRules)
@@ -1403,6 +1415,21 @@ func (m *Model) adjustInspectorField(delta int) {
 		output.X += delta * 10
 	case 6:
 		output.Y += delta * 10
+	case 7:
+		targets := []string{""}
+		for i, other := range m.editOutputs {
+			if i != m.selectedOutput {
+				targets = append(targets, other.Key)
+			}
+		}
+		current := 0
+		for i, t := range targets {
+			if t == output.MirrorOf {
+				current = i
+				break
+			}
+		}
+		output.MirrorOf = targets[wrapIndex(current+delta, len(targets))]
 	}
 }
 
@@ -1556,6 +1583,19 @@ func (m Model) layoutFieldValue(output editableOutput, field int) string {
 		return fmt.Sprintf("%d", output.X)
 	case 6:
 		return fmt.Sprintf("%d", output.Y)
+	case 7:
+		if output.MirrorOf == "" {
+			return "None"
+		}
+		for _, other := range m.editOutputs {
+			if other.Key == output.MirrorOf {
+				if other.Description != "" {
+					return other.Description
+				}
+				return other.Name
+			}
+		}
+		return output.MirrorOf
 	default:
 		return ""
 	}
@@ -1687,6 +1727,7 @@ func editableOutputFromProfile(saved profile.OutputConfig, live hypr.Monitor, ha
 		Scale:     clampFloat(saved.Scale, 0.25, 4.0),
 		VRR:       saved.VRR,
 		Transform: saved.Transform,
+		MirrorOf:  saved.MirrorOf,
 	}
 
 	mode := saved.NormalizedMode()
@@ -1809,6 +1850,7 @@ func (o editableOutput) profileOutput() profile.OutputConfig {
 		Scale:     o.Scale,
 		VRR:       o.VRR,
 		Transform: o.Transform,
+		MirrorOf:  o.MirrorOf,
 	}
 }
 
@@ -2229,12 +2271,6 @@ func transformLabel(v int) string {
 	}
 }
 
-func blankMirror(value string) string {
-	if value == "" || value == "none" {
-		return ""
-	}
-	return value
-}
 
 func blankStrategy(strategy profile.WorkspaceStrategy) profile.WorkspaceStrategy {
 	if strategy == "" {
@@ -2340,6 +2376,7 @@ var layoutFields = []string{
 	"Transform",
 	"Position X",
 	"Position Y",
+	"Mirror",
 }
 
 func layoutFieldShortLabel(field int) string {
@@ -2352,6 +2389,8 @@ func layoutFieldShortLabel(field int) string {
 		return "X"
 	case 6:
 		return "Y"
+	case 7:
+		return "Mirror"
 	default:
 		return layoutFields[field]
 	}
