@@ -25,7 +25,7 @@ hero:
 features:
   - icon: 🖥️
     title: Spatial Layout Editor
-    details: Drag monitors on a canvas, tweak mode, scale, VRR, and exact position in the inspector. See the result before you apply it.
+    details: Drag monitors on a canvas, tweak mode, scale, VRR, mirror, and exact position in the inspector. See the result before you apply it.
   - icon: 🔌
     title: Hotplug-Aware Daemon
     details: Plug in a monitor and walk away. The daemon scores your saved profiles against connected hardware and applies the best match automatically.

@@ -34,6 +34,7 @@ Existing tools try to help but bring their own baggage: Python runtimes, GTK dep
 | Profiles | Yes | Yes | Yes | Yes | No | Yes |
 | Auto-switching daemon | Yes | Yes | Yes | No (roadmap) | No | Yes |
 | Workspace planning | Yes | Yes | No | No | Basic | No |
+| Mirror support | Yes | Yes | Yes | Yes | Yes | No |
 | Safe apply with revert | Yes | Yes | No | Partial (manual rollback) | No | No |
 | Source-chain verification | Yes | No | No | No | No | No |
 | Works over SSH | Yes | No | No | No | No | N/A |

@@ -36,10 +36,11 @@ Both use the same apply engine: write `monitors.conf` atomically, reload Hyprlan
 ## Features
 
 - **Spatial layout editor** -- drag monitors on a canvas, see them move in real time
-- **Per-monitor inspector** -- mode, scale, VRR, transform, exact position
+- **Per-monitor inspector** -- mode, scale, VRR, transform, mirror, exact position
 - **Named profiles** -- save "desk", "conference", "home-office", switch between them instantly
 - **Hardware-identity matching** -- profiles follow your monitors, not connector names
 - **Hotplug-aware daemon** -- plug in, walk away, the right profile is applied automatically
+- **Monitor mirroring** -- mirror any monitor to another, with configurable resolution to avoid pixelation
 - **Workspace planner** -- sequential, interleave, or manual workspace placement across monitors
 - **Safe apply with revert** -- a 10-second confirmation window so you never get locked out
 - **Source-chain verification** -- refuses to write a `monitors.conf` that Hyprland isn't even reading
@@ -127,6 +128,7 @@ You don't commit `monitors.conf`. You commit your profiles. The tool writes `mon
 | Profiles | Yes | Yes | Yes | Yes | No | Yes |
 | Auto-switching daemon | Yes | Yes | Yes | No (roadmap) | No | Yes |
 | Workspace planning | Yes | Yes | No | No | Basic | No |
+| Mirror support | Yes | Yes | Yes | Yes | Yes | No |
 | Safe apply with revert | Yes | Yes | No | Partial (manual rollback) | No | No |
 | Source-chain verification | Yes | No | No | No | No | No |
 | Works over SSH | Yes | No | No | No | No | N/A |
