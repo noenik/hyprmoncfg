@@ -167,6 +167,10 @@ func TestCommandsForProfileMirror(t *testing.T) {
 			Key:      secondary.HardwareKey(),
 			Name:     "HDMI-A-1",
 			Enabled:  true,
+			Width:    1920,
+			Height:   1080,
+			Refresh:  60,
+			Scale:    1,
 			MirrorOf: primary.HardwareKey(),
 		},
 	})
@@ -177,6 +181,9 @@ func TestCommandsForProfileMirror(t *testing.T) {
 	}
 	if len(cmds) != 2 {
 		t.Fatalf("expected 2 commands, got %d: %v", len(cmds), cmds)
+	}
+	if !strings.Contains(cmds[1], "1920x1080@60") {
+		t.Fatalf("expected mirror command to include resolution, got: %s", cmds[1])
 	}
 	if !strings.Contains(cmds[1], "mirror,DP-1") {
 		t.Fatalf("expected mirror command targeting DP-1, got: %s", cmds[1])
@@ -200,6 +207,10 @@ func TestRenderHyprlandConfigMirrorV1(t *testing.T) {
 			Key:      secondary.HardwareKey(),
 			Name:     "HDMI-A-1",
 			Enabled:  true,
+			Width:    1920,
+			Height:   1080,
+			Refresh:  60,
+			Scale:    1,
 			MirrorOf: primary.HardwareKey(),
 		},
 	})
@@ -208,8 +219,10 @@ func TestRenderHyprlandConfigMirrorV1(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected render error: %v", err)
 	}
-	if !strings.Contains(rendered, "mirror,desc:Dell U2720Q") {
-		t.Fatalf("expected v1 mirror line with desc: selector, got:\n%s", rendered)
+	for _, want := range []string{"1920x1080@60", "mirror,desc:Dell U2720Q"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("expected v1 mirror line to contain %q, got:\n%s", want, rendered)
+		}
 	}
 }
 
@@ -230,6 +243,10 @@ func TestRenderHyprlandConfigMirrorV2(t *testing.T) {
 			Key:      secondary.HardwareKey(),
 			Name:     "HDMI-A-1",
 			Enabled:  true,
+			Width:    1920,
+			Height:   1080,
+			Refresh:  60,
+			Scale:    1,
 			MirrorOf: primary.HardwareKey(),
 		},
 	})
@@ -238,10 +255,7 @@ func TestRenderHyprlandConfigMirrorV2(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected render error: %v", err)
 	}
-	if !strings.Contains(rendered, "mirror = desc:Dell U2720Q") {
-		t.Fatalf("expected v2 mirror block, got:\n%s", rendered)
-	}
-	// The mirror block should contain only output + mirror, not mode/position/scale.
+	// The mirror block should contain mode, position, scale, AND mirror.
 	mirrorIdx := strings.Index(rendered, "desc:LG 27GP850")
 	if mirrorIdx < 0 {
 		t.Fatalf("mirror monitor block not found in:\n%s", rendered)
@@ -251,9 +265,9 @@ func TestRenderHyprlandConfigMirrorV2(t *testing.T) {
 	if endIdx >= 0 {
 		mirrorBlock = mirrorBlock[:endIdx]
 	}
-	for _, forbidden := range []string{"position", "mode", "scale"} {
-		if strings.Contains(mirrorBlock, forbidden) {
-			t.Fatalf("mirror v2 block should not contain %q, got:\n%s", forbidden, rendered)
+	for _, want := range []string{"mode = 1920x1080@60", "position =", "scale =", "mirror = desc:Dell U2720Q"} {
+		if !strings.Contains(mirrorBlock, want) {
+			t.Fatalf("mirror v2 block should contain %q, got:\n%s", want, rendered)
 		}
 	}
 }
@@ -291,12 +305,15 @@ func TestValidateLayoutSkipsMirroredMonitors(t *testing.T) {
 func TestSnapshotCommandsMirror(t *testing.T) {
 	monitors := []hypr.Monitor{
 		{Name: "DP-1", Width: 2560, Height: 1440, RefreshRate: 144, Scale: 1},
-		{Name: "HDMI-A-1", Width: 2560, Height: 1440, MirrorOf: "DP-1", Scale: 1},
+		{Name: "HDMI-A-1", Width: 1920, Height: 1080, RefreshRate: 60, MirrorOf: "DP-1", Scale: 1},
 	}
 
 	cmds := SnapshotCommands(monitors)
 	if len(cmds) != 2 {
 		t.Fatalf("expected 2 commands, got %d: %v", len(cmds), cmds)
+	}
+	if !strings.Contains(cmds[1], "1920x1080@60") {
+		t.Fatalf("expected snapshot mirror command to include resolution, got: %s", cmds[1])
 	}
 	if !strings.Contains(cmds[1], "mirror,DP-1") {
 		t.Fatalf("expected snapshot mirror command, got: %s", cmds[1])

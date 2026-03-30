@@ -96,10 +96,6 @@ func SnapshotCommands(monitors []hypr.Monitor) []string {
 			commands = append(commands, fmt.Sprintf("%s,disable", m.Name))
 			continue
 		}
-		if m.MirrorOf != "" {
-			commands = append(commands, fmt.Sprintf("%s,preferred,auto,mirror,%s", m.Name, m.MirrorOf))
-			continue
-		}
 		out := profile.OutputConfig{
 			Enabled:   true,
 			Mode:      m.ModeString(),
@@ -112,7 +108,7 @@ func SnapshotCommands(monitors []hypr.Monitor) []string {
 			VRR:       boolToVRR(m.VRR),
 			Transform: m.Transform,
 		}
-		commands = append(commands, commandForOutput(m.Name, out, ""))
+		commands = append(commands, commandForOutput(m.Name, out, m.MirrorOf))
 	}
 	return commands
 }
@@ -190,10 +186,6 @@ func commandForOutput(name string, out profile.OutputConfig, mirrorTarget string
 	if !out.Enabled {
 		return fmt.Sprintf("%s,disable", name)
 	}
-	if mirrorTarget != "" {
-		return fmt.Sprintf("%s,preferred,auto,mirror,%s", name, mirrorTarget)
-	}
-
 	mode := strings.TrimSpace(out.NormalizedMode())
 	if mode == "" {
 		mode = "preferred"
@@ -216,7 +208,11 @@ func commandForOutput(name string, out profile.OutputConfig, mirrorTarget string
 		vrr = 0
 	}
 
-	return fmt.Sprintf("%s,%s,%dx%d,%s,transform,%d,vrr,%d", name, mode, x, y, formatFloat(scale, 3), transform, vrr)
+	cmd := fmt.Sprintf("%s,%s,%dx%d,%s,transform,%d,vrr,%d", name, mode, x, y, formatFloat(scale, 3), transform, vrr)
+	if mirrorTarget != "" {
+		cmd += ",mirror," + mirrorTarget
+	}
+	return cmd
 }
 
 func formatFloat(v float64, precision int) string {
@@ -476,11 +472,6 @@ func renderMonitorV2Block(monitor hypr.Monitor, output profile.OutputConfig, mir
 		lines = append(lines, "  disabled = 1", "}")
 		return strings.Join(lines, "\n")
 	}
-	if mirrorTarget != "" {
-		lines = append(lines, "  mirror = "+mirrorTarget, "}")
-		return strings.Join(lines, "\n")
-	}
-
 	mode := strings.TrimSpace(strings.TrimSuffix(output.NormalizedMode(), "Hz"))
 	if mode == "" {
 		mode = "preferred"
@@ -493,6 +484,9 @@ func renderMonitorV2Block(monitor hypr.Monitor, output profile.OutputConfig, mir
 	}
 	if output.VRR != 0 {
 		lines = append(lines, fmt.Sprintf("  vrr = %d", output.VRR))
+	}
+	if mirrorTarget != "" {
+		lines = append(lines, "  mirror = "+mirrorTarget)
 	}
 	lines = append(lines, "}")
 	return strings.Join(lines, "\n")
