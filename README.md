@@ -1,6 +1,29 @@
-# hyprmoncfg
+<div align="center">
 
-**Hyprland monitor configuration that actually works.**
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/images/logotype_dark.svg">
+  <img src="docs/assets/images/logotype.svg" alt="hyprmoncfg" height="120">
+</picture>
+
+<strong>Hyprland monitor configuration that actually works.</strong>
+
+[![GitHub Release](https://img.shields.io/github/v/release/crmne/hyprmoncfg)](https://github.com/crmne/hyprmoncfg/releases)
+[![AUR](https://img.shields.io/aur/version/hyprmoncfg)](https://aur.archlinux.org/packages/hyprmoncfg)
+[![Go Report Card](https://goreportcard.com/badge/github.com/crmne/hyprmoncfg)](https://goreportcard.com/report/github.com/crmne/hyprmoncfg)
+[![CI](https://github.com/crmne/hyprmoncfg/actions/workflows/ci.yml/badge.svg)](https://github.com/crmne/hyprmoncfg/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+
+<a href="https://terminaltrove.com/hyprmoncfg/">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/images/terminal-trove-tool-of-the-week-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/images/terminal-trove-tool-of-the-week-light.svg">
+    <img alt="Terminal Trove Tool of the Week" src="docs/assets/images/terminal-trove-tool-of-the-week-light.svg" height="48">
+  </picture>
+</a>
+
+</div>
+
+---
 
 You know the drill. You plug in a monitor. Nothing happens the way you want. You open `hyprland.conf`, squint at coordinate math, guess at `monitor=` lines, reload, realize the positions are wrong, edit again. You go to a conference, plug into a projector, and start the whole dance over.
 
