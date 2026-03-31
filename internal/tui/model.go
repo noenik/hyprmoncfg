@@ -643,7 +643,6 @@ func (m Model) renderMain() string {
 	content := strings.Join([]string{
 		title,
 		tabs,
-		"",
 		body,
 		"",
 		status,
@@ -667,7 +666,14 @@ func (m Model) renderTabs() string {
 		}
 		parts = append(parts, style.Render(fmt.Sprintf("%d %s", idx+1, label)))
 	}
-	return lipgloss.JoinHorizontal(lipgloss.Top, parts...)
+	row := lipgloss.JoinHorizontal(lipgloss.Bottom, parts...)
+	if gap := m.terminalWidth() - lipgloss.Width(row) - 2; gap > 0 {
+		rule := withFG(lipgloss.NewStyle(), m.styles.palette.tabBorder).Render(strings.Repeat("─", gap))
+		lines := strings.Split(row, "\n")
+		lines[len(lines)-1] += rule
+		row = strings.Join(lines, "\n")
+	}
+	return row
 }
 
 func (m Model) renderLayoutView(height int) string {

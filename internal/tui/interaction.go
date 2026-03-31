@@ -148,10 +148,10 @@ func (m Model) renderModalScreen(overlay string) string {
 
 	title := m.renderTitleBar()
 	tabs := m.renderTabs()
-	bodyHeight := max(12, height-lipgloss.Height(title)-lipgloss.Height(tabs)-3)
+	bodyHeight := max(12, height-lipgloss.Height(title)-lipgloss.Height(tabs)-2)
 	centered := lipgloss.Place(width-2, bodyHeight, lipgloss.Center, lipgloss.Center, overlay)
 	body := m.styles.modalBackdrop.Width(width).Height(bodyHeight).Render(centered)
-	return strings.Join([]string{title, tabs, "", body}, "\n")
+	return strings.Join([]string{title, tabs, body}, "\n")
 }
 
 func (m Model) monitorStateBadge(output editableOutput) string {

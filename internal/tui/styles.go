@@ -7,6 +7,29 @@ import (
 	"github.com/muesli/termenv"
 )
 
+var (
+	activeTabBorder = lipgloss.Border{
+		Top:         "─",
+		Bottom:      " ",
+		Left:        "│",
+		Right:       "│",
+		TopLeft:     "╭",
+		TopRight:    "╮",
+		BottomLeft:  "┘",
+		BottomRight: "└",
+	}
+	inactiveTabBorder = lipgloss.Border{
+		Top:         " ",
+		Bottom:      "─",
+		Left:        " ",
+		Right:       " ",
+		TopLeft:     " ",
+		TopRight:    " ",
+		BottomLeft:  " ",
+		BottomRight: " ",
+	}
+)
+
 type palette struct {
 	text               string
 	titleFg            string
@@ -120,8 +143,8 @@ func newStyles() styles {
 		focused:          withBG(withFG(lipgloss.NewStyle().Bold(true).Padding(0, 1), p.fieldSelectedFg), p.fieldSelectedBg),
 		activePane:       withBG(lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color(p.paneActiveBorder)).Padding(0, 1), p.panelBg),
 		inactivePane:     withBG(lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color(p.paneBorder)).Padding(0, 1), p.panelBg),
-		tabActive:        withBG(withFG(lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color(p.tabActiveBorder)).Padding(0, 1).Bold(true), p.tabActiveFg), p.tabActiveBg),
-		tabInactive:      withFG(lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color(p.tabBorder)).Padding(0, 1), p.tabInactiveFg),
+		tabActive:        lipgloss.NewStyle().Border(activeTabBorder).BorderForeground(lipgloss.Color(p.tabActiveBorder)).Padding(0, 1).Bold(true),
+		tabInactive:      withFG(lipgloss.NewStyle().Border(inactiveTabBorder).BorderForeground(lipgloss.Color(p.tabBorder)).Padding(0, 1), p.tabInactiveFg),
 		statusOK:         withFG(lipgloss.NewStyle().Bold(true), p.statusOK),
 		statusError:      withFG(lipgloss.NewStyle().Bold(true), p.statusError),
 		help:             withFG(lipgloss.NewStyle(), p.help),
