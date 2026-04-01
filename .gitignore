@@ -5,3 +5,5 @@ dist/
 *.tmp
 *.swp
 .DS_Store
+hyprmoncfg
+hyprmoncfgd

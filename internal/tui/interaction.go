@@ -12,6 +12,9 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
+
+	"github.com/crmne/hyprmoncfg/internal/profile"
 )
 
 type pickerItem string
@@ -107,6 +110,26 @@ type canvasGeometry struct {
 	offsetX int
 	offsetY int
 	rects   []canvasRect
+}
+
+type hitRect struct {
+	x int
+	y int
+	w int
+	h int
+}
+
+func (r hitRect) contains(x, y int) bool {
+	return x >= r.x && x < r.x+r.w && y >= r.y && y < r.y+r.h
+}
+
+func (r hitRect) inner(style lipgloss.Style) hitRect {
+	return hitRect{
+		x: r.x + style.GetBorderLeftSize() + style.GetPaddingLeft(),
+		y: r.y + style.GetBorderTopSize() + style.GetPaddingTop(),
+		w: max(1, r.w-style.GetHorizontalFrameSize()),
+		h: max(1, r.h-style.GetVerticalFrameSize()),
+	}
 }
 
 func (m Model) renderTitleBar() string {
@@ -624,15 +647,16 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft && msg.Y == 0 {
+	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft && msg.Y == m.appContentY() {
 		titleWidth := lipgloss.Width(m.styles.title.Render("hyprmoncfg"))
-		if msg.X >= 1 && msg.X < 1+titleWidth {
+		titleStart := m.appContentX()
+		if msg.X >= titleStart && msg.X < titleStart+titleWidth {
 			return m, m.openURLCmd("hyprmoncfg", homeURL)
 		}
 		// Daemon status link on the right side of title bar
 		daemonWidth := lipgloss.Width(m.daemonStatusLabel())
 		contentWidth := m.footerContentWidth()
-		daemonStart := 1 + contentWidth - daemonWidth
+		daemonStart := m.appContentX() + contentWidth - daemonWidth
 		if msg.X >= daemonStart && msg.X < daemonStart+daemonWidth {
 			return m, m.openURLCmd(m.daemonStatusLabel(), daemonURL)
 		}
@@ -665,15 +689,15 @@ func (m Model) updateSaveMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.saveDialog == nil {
 		return m, nil
 	}
-	if msg.Action != tea.MouseActionPress && msg.Action != tea.MouseActionMotion {
+	if msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
 		return m, nil
 	}
-	var cmd tea.Cmd
-	m.saveDialog.List, cmd = m.saveDialog.List.Update(msg)
-	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
+
+	if index, ok := m.saveDialogItemIndexAt(msg.X, msg.Y); ok {
+		m.saveDialog.List.Select(index)
 		m.syncSaveNameFromSelection()
 	}
-	return m, cmd
+	return m, nil
 }
 
 func (m Model) updateModePickerMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
@@ -681,22 +705,26 @@ func (m Model) updateModePickerMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	var cmd tea.Cmd
-	m.picker.List, cmd = m.picker.List.Update(msg)
-	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
+	if msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
+		return m, nil
+	}
+
+	if index, ok := m.modePickerItemIndexAt(msg.X, msg.Y); ok {
+		m.picker.List.Select(index)
 		return m.commitModePicker()
 	}
-	return m, cmd
+
+	return m, nil
 }
 
 func (m Model) updateLayoutMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	bodyY := m.bodyOriginY()
-	canvasWidth, inspectorWidth := m.layoutPaneWidths()
-	layout := m.canvasLayout(canvasWidth-4, m.canvasMouseHeight())
+	canvasRect, _ := m.layoutCanvasRect()
+	inspectorRect, compact := m.layoutInspectorRect()
+	layout := m.canvasLayout(canvasRect.w-m.styles.inactivePane.GetHorizontalFrameSize(), m.canvasMouseHeight())
 
-	if m.inCanvas(msg.X, msg.Y, bodyY, canvasWidth, layout) {
+	if m.inCanvas(msg.X, msg.Y, canvasRect, layout) {
 		m.layoutFocus = layoutFocusCanvas
-		localX, localY := m.canvasLocalPoint(msg.X, msg.Y, bodyY)
+		localX, localY := m.canvasLocalPoint(msg.X, msg.Y, canvasRect)
 		if rect, ok := layout.rectAt(localX, localY); ok {
 			m.selectedOutput = rect.index
 			if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
@@ -720,10 +748,9 @@ func (m Model) updateLayoutMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	inspectorX := canvasWidth + 2
-	if msg.X >= inspectorX && msg.X < inspectorX+inspectorWidth {
+	if inspectorRect.contains(msg.X, msg.Y) {
 		m.layoutFocus = layoutFocusInspector
-		if field, ok := m.inspectorFieldAt(msg.Y, bodyY); ok && msg.Action == tea.MouseActionPress {
+		if field, ok := m.inspectorFieldAt(msg.Y, inspectorRect, compact); ok && msg.Action == tea.MouseActionPress {
 			m.inspectorField = field
 			switch msg.Button {
 			case tea.MouseButtonLeft:
@@ -746,8 +773,12 @@ func (m Model) updateProfilesMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	bodyY := m.bodyOriginY()
-	row := msg.Y - (bodyY + 3)
+	listRect := m.profilesListRect()
+	if !listRect.contains(msg.X, msg.Y) {
+		return m, nil
+	}
+
+	row := msg.Y - (listRect.inner(m.styles.activePane).y + 2)
 	if row < 0 || row >= len(m.profiles) {
 		return m, nil
 	}
@@ -756,14 +787,13 @@ func (m Model) updateProfilesMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateWorkspaceMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	bodyY := m.bodyOriginY()
-	leftWidth, _ := m.sidePaneWidths(35)
-
-	if msg.X < 0 || msg.X >= leftWidth || msg.Y < bodyY {
+	settingsRect := m.workspaceSettingsRect()
+	if !settingsRect.contains(msg.X, msg.Y) {
 		return m, nil
 	}
 
-	fieldRow := msg.Y - (bodyY + 3)
+	inner := settingsRect.inner(m.styles.activePane)
+	fieldRow := msg.Y - (inner.y + 2)
 	if fieldRow >= 0 && fieldRow < len(workspaceFields) && msg.Action == tea.MouseActionPress {
 		m.workspaceEdit.SelectedField = fieldRow
 		switch msg.Button {
@@ -781,7 +811,7 @@ func (m Model) updateWorkspaceMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// "Monitor order" header + items start after fields + 2 lines (blank + header)
-	orderStart := bodyY + 3 + len(workspaceFields) + 2
+	orderStart := inner.y + len(workspaceFields) + 4
 	if msg.Action == tea.MouseActionPress && msg.Y >= orderStart {
 		row := msg.Y - orderStart
 		if row >= 0 && row < len(m.workspaceEdit.MonitorOrder) {
@@ -794,15 +824,185 @@ func (m Model) updateWorkspaceMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) bodyOriginY() int {
-	return lipgloss.Height(m.renderTitleBar()) + lipgloss.Height(m.renderTabs()) + 1
+	return m.bodyRect().y
+}
+
+func (m Model) appContentX() int {
+	return m.styles.app.GetPaddingLeft()
+}
+
+func (m Model) appContentY() int {
+	return m.styles.app.GetPaddingTop()
+}
+
+func (m Model) bodyRect() hitRect {
+	title := m.renderTitleBar()
+	tabs := m.renderTabs()
+	footer := m.renderFooterBar()
+	return hitRect{
+		x: m.appContentX(),
+		y: m.appContentY() + lipgloss.Height(title) + lipgloss.Height(tabs),
+		w: m.footerContentWidth(),
+		h: m.mainBodyHeight(title, tabs, "", footer),
+	}
+}
+
+func (m Model) layoutCanvasRect() (hitRect, bool) {
+	body := m.bodyRect()
+	if m.useCompactLayout(body.h) {
+		canvasHeight, _ := m.compactLayoutHeights(body.h)
+		return hitRect{x: body.x, y: body.y, w: body.w, h: canvasHeight}, true
+	}
+
+	canvasWidth, _ := m.layoutPaneWidths()
+	return hitRect{x: body.x, y: body.y, w: canvasWidth, h: body.h}, false
+}
+
+func (m Model) layoutInspectorRect() (hitRect, bool) {
+	body := m.bodyRect()
+	if m.useCompactLayout(body.h) {
+		canvasHeight, inspectorHeight := m.compactLayoutHeights(body.h)
+		return hitRect{x: body.x, y: body.y + canvasHeight, w: body.w, h: inspectorHeight}, true
+	}
+
+	canvasWidth, inspectorWidth := m.layoutPaneWidths()
+	return hitRect{x: body.x + canvasWidth + 2, y: body.y, w: inspectorWidth, h: body.h}, false
+}
+
+func (m Model) profilesListRect() hitRect {
+	body := m.bodyRect()
+	if m.terminalWidth() < 96 {
+		listHeight := clampInt(len(m.profiles)+3, 4, body.h/3)
+		return hitRect{x: body.x, y: body.y, w: body.w, h: listHeight}
+	}
+
+	listWidth, _ := m.sidePaneWidths(35)
+	return hitRect{x: body.x, y: body.y, w: listWidth, h: body.h}
+}
+
+func (m Model) workspaceSettingsRect() hitRect {
+	body := m.bodyRect()
+	if m.terminalWidth() < 96 {
+		settingsHeight := clampInt(m.workspaceSettingsLineCount()+2, 6, (body.h*2)/3)
+		return hitRect{x: body.x, y: body.y, w: body.w, h: settingsHeight}
+	}
+
+	leftWidth, _ := m.sidePaneWidths(35)
+	return hitRect{x: body.x, y: body.y, w: leftWidth, h: body.h}
+}
+
+func (m Model) workspaceSettingsLineCount() int {
+	count := 2 + len(workspaceFields) + 2
+	if len(m.workspaceEdit.MonitorOrder) == 0 {
+		count++
+	} else {
+		count += len(m.workspaceEdit.MonitorOrder)
+	}
+	if m.workspaceEdit.Strategy == profile.WorkspaceStrategyManual && len(m.workspaceEdit.Rules) > 0 {
+		count += 3
+	}
+	return count
+}
+
+func (m Model) modalOverlayRect(overlay string) hitRect {
+	if overlay == "" {
+		return hitRect{}
+	}
+
+	titleHeight := lipgloss.Height(m.renderTitleBar())
+	tabsHeight := lipgloss.Height(m.renderTabs())
+	bodyHeight := max(12, m.terminalHeight()-titleHeight-tabsHeight-2)
+	bodyWidth := m.terminalWidth() - m.styles.modalBackdrop.GetHorizontalFrameSize()
+
+	return hitRect{
+		x: m.styles.modalBackdrop.GetPaddingLeft() + max(0, (bodyWidth-lipgloss.Width(overlay))/2),
+		y: titleHeight + tabsHeight + m.styles.modalBackdrop.GetPaddingTop() + max(0, (bodyHeight-lipgloss.Height(overlay))/2),
+		w: lipgloss.Width(overlay),
+		h: lipgloss.Height(overlay),
+	}
+}
+
+func (m Model) modePickerListRect() hitRect {
+	if m.picker == nil {
+		return hitRect{}
+	}
+
+	overlay := m.renderModePicker()
+	modalRect := m.modalOverlayRect(overlay)
+	inner := modalRect.inner(m.styles.modal)
+	listView := m.picker.List.View()
+	return hitRect{
+		x: inner.x,
+		y: inner.y + 4,
+		w: lipgloss.Width(listView),
+		h: lipgloss.Height(listView),
+	}
+}
+
+func (m Model) modePickerItemIndexAt(x, y int) (int, bool) {
+	if m.picker == nil {
+		return 0, false
+	}
+
+	items := m.picker.List.VisibleItems()
+	start, end := m.picker.List.Paginator.GetSliceBounds(len(items))
+	return visibleListItemIndexAt(m.View(), x, y, items, start, end)
+}
+
+func (m Model) saveDialogItemIndexAt(x, y int) (int, bool) {
+	if m.saveDialog == nil {
+		return 0, false
+	}
+
+	items := m.saveDialog.List.VisibleItems()
+	start, end := m.saveDialog.List.Paginator.GetSliceBounds(len(items))
+	return visibleListItemIndexAt(m.View(), x, y, items, start, end)
+}
+
+func visibleListItemIndexAt(view string, x, y int, items []list.Item, start, end int) (int, bool) {
+	lines := strings.Split(ansi.Strip(view), "\n")
+	if y < 0 || y >= len(lines) {
+		return 0, false
+	}
+	line := lines[y]
+
+	for index := start; index < end; index++ {
+		for _, label := range visibleListItemLabels(items[index]) {
+			col := strings.Index(line, label)
+			if col < 0 {
+				continue
+			}
+			labelStart := max(0, lipgloss.Width(line[:col])-2)
+			labelEnd := lipgloss.Width(line[:col]) + lipgloss.Width(label)
+			if x >= labelStart && x < labelEnd {
+				return index, true
+			}
+		}
+	}
+
+	return 0, false
+}
+
+func visibleListItemLabels(item list.Item) []string {
+	labels := []string{item.FilterValue()}
+
+	if titled, ok := item.(interface{ Title() string }); ok {
+		labels = append(labels, titled.Title())
+	}
+	if described, ok := item.(interface{ Description() string }); ok {
+		if description := described.Description(); description != "" {
+			labels = append(labels, description)
+		}
+	}
+
+	return labels
 }
 
 func (m Model) canvasMouseHeight() int {
-	canvasWidth, _ := m.layoutPaneWidths()
 	panel := m.styles.inactivePane
-	bodyHeight := max(3, m.terminalHeight()-m.bodyOriginY()-3)
-	innerHeight := max(1, bodyHeight-panel.GetVerticalFrameSize())
-	innerWidth := max(1, canvasWidth-panel.GetHorizontalFrameSize())
+	canvasRect, _ := m.layoutCanvasRect()
+	innerHeight := max(1, canvasRect.h-panel.GetVerticalFrameSize())
+	innerWidth := max(1, canvasRect.w-panel.GetHorizontalFrameSize())
 
 	nonCanvasLines := 1
 	if innerHeight >= 8 && innerWidth >= 44 {
@@ -824,9 +1024,13 @@ func (m Model) canvasMouseHeight() int {
 
 func (m Model) tabAt(x, y int) (mainTab, bool) {
 	titleH := lipgloss.Height(m.renderTitleBar())
-	tabY := titleH
+	tabY := m.appContentY() + titleH
 	tabHeight := lipgloss.Height(m.renderTabs())
 	if y < tabY || y >= tabY+tabHeight {
+		return tabLayout, false
+	}
+	localX := x - m.appContentX()
+	if localX < 0 {
 		return tabLayout, false
 	}
 
@@ -838,7 +1042,7 @@ func (m Model) tabAt(x, y int) (mainTab, bool) {
 			style = m.styles.tabActive
 		}
 		width := lipgloss.Width(style.Render(fmt.Sprintf("%d %s", idx+1, label)))
-		if x >= cursorX && x < cursorX+width {
+		if localX >= cursorX && localX < cursorX+width {
 			return mainTab(idx), true
 		}
 		cursorX += width
@@ -846,25 +1050,30 @@ func (m Model) tabAt(x, y int) (mainTab, bool) {
 	return tabLayout, false
 }
 
-func (m Model) inCanvas(x, y, bodyY, canvasWidth int, layout canvasGeometry) bool {
-	localX, localY := m.canvasLocalPoint(x, y, bodyY)
+func (m Model) inCanvas(x, y int, canvasRect hitRect, layout canvasGeometry) bool {
+	localX, localY := m.canvasLocalPoint(x, y, canvasRect)
 	return localX >= 0 && localX < layout.width && localY >= 0 && localY < layout.height
 }
 
-func (m Model) canvasLocalPoint(x, y, bodyY int) (int, int) {
-	canvasX := 2
-	canvasY := bodyY + 2
+func (m Model) canvasLocalPoint(x, y int, canvasRect hitRect) (int, int) {
+	inner := canvasRect.inner(m.styles.inactivePane)
+	canvasX := inner.x
+	canvasY := inner.y + 1
 	return x - canvasX, y - canvasY
 }
 
-func (m Model) inspectorFieldAt(y, bodyY int) (int, bool) {
+func (m Model) inspectorFieldAt(y int, inspectorRect hitRect, compact bool) (int, bool) {
 	if len(m.editOutputs) == 0 {
 		return 0, false
 	}
-	output := m.editOutputs[m.selectedOutput]
-	detailCount := len(m.inspectorDetailLines(output))
-	// pane border(1) + header(1) + blank(1) + "Info"(1) + details(N) + blank(1) + "Preferences"(1) = N+6
-	row := bodyY + detailCount + 6
+	inner := inspectorRect.inner(m.styles.inactivePane)
+	row := inner.y + 4
+	if !compact {
+		output := m.editOutputs[m.selectedOutput]
+		detailCount := len(m.inspectorDetailLines(output))
+		// header + blank + info + details + blank + preferences
+		row = inner.y + detailCount + 5
+	}
 	for idx := range layoutFields {
 		if y == row+idx {
 			return idx, true

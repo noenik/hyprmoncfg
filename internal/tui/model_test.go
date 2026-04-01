@@ -1,12 +1,14 @@
 package tui
 
 import (
+	"fmt"
 	"errors"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/crmne/hyprmoncfg/internal/buildinfo"
 	"github.com/crmne/hyprmoncfg/internal/profile"
@@ -157,6 +159,42 @@ func TestFooterLinkAtReturnsClickableRegionsOnly(t *testing.T) {
 	}
 }
 
+func TestFooterLinkAtMatchesVisibleFooterTextPosition(t *testing.T) {
+	prevVersion := buildinfo.Version
+	buildinfo.Version = "1.2.3"
+	defer func() { buildinfo.Version = prevVersion }()
+
+	m := Model{
+		styles: newStyles(),
+		width:  200,
+		height: 24,
+		tab:    tabLayout,
+	}
+
+	footer := m.renderFooterBar()
+	for _, want := range []struct {
+		label string
+		url   string
+	}{
+		{label: "Ask", url: communityURL},
+		{label: "Donate", url: sponsorURL},
+	} {
+		offset := strings.Index(footer, want.label)
+		if offset < 0 {
+			t.Fatalf("expected footer text to contain %q, got %q", want.label, footer)
+		}
+
+		x := m.footerColumnX() + m.badgeExtraWidth() + offset
+		hit, ok := m.footerLinkAt(x, m.footerRowY())
+		if !ok {
+			t.Fatalf("expected click on visible %q at x=%d to resolve to a link", want.label, x)
+		}
+		if hit.label != want.label || hit.url != want.url {
+			t.Fatalf("expected %q link at x=%d, got %+v", want.label, x, hit)
+		}
+	}
+}
+
 func TestFooterClickRunsBrowserOpenCommand(t *testing.T) {
 	prevVersion := buildinfo.Version
 	buildinfo.Version = "1.2.3"
@@ -192,6 +230,177 @@ func TestOpenURLMsgSetsErrorStatus(t *testing.T) {
 	}
 	if !strings.Contains(got.status, "Failed to open Ask link") {
 		t.Fatalf("expected open-url failure in status, got %q", got.status)
+	}
+}
+
+func TestProfilesMouseSelectsVisibleRow(t *testing.T) {
+	m := Model{
+		styles:   newStyles(),
+		width:    120,
+		height:   24,
+		tab:      tabProfiles,
+		profiles: []profile.Profile{testProfile("Laptop Home", 1), testProfile("Desk Dock", 2)},
+	}
+
+	x, y := findVisiblePosition(t, m.renderMain(), "Desk Dock")
+	updated, _ := m.updateMouse(mousePressAt(x, y))
+	got := updated.(Model)
+	if got.selectedProfile != 1 {
+		t.Fatalf("expected visible click on Desk Dock to select row 1, got %d", got.selectedProfile)
+	}
+}
+
+func TestProfilesMouseIgnoresDetailsPaneInCompactLayout(t *testing.T) {
+	m := Model{
+		styles: newStyles(),
+		width:  80,
+		height: 24,
+		tab:    tabProfiles,
+		profiles: []profile.Profile{
+			testProfile("Laptop Home", 1),
+			testProfile("Desk Dock", 2),
+			testProfile("Travel Dock", 1),
+			testProfile("Office Desk", 2),
+			testProfile("Studio", 1),
+			testProfile("Projector", 1),
+		},
+		selectedProfile: 5,
+	}
+
+	x, y := findVisiblePosition(t, m.renderMain(), "Updated:")
+	updated, _ := m.updateMouse(mousePressAt(x, y))
+	got := updated.(Model)
+	if got.selectedProfile != 5 {
+		t.Fatalf("expected compact details-pane click to keep selected profile 5, got %d", got.selectedProfile)
+	}
+}
+
+func TestWorkspaceMouseSelectsVisibleField(t *testing.T) {
+	m := Model{
+		styles: newStyles(),
+		width:  120,
+		height: 24,
+		tab:    tabWorkspaces,
+		editOutputs: []editableOutput{
+			{Key: "mon-a", Name: "DP-1", Enabled: true, Scale: 1},
+			{Key: "mon-b", Name: "HDMI-A-1", Enabled: true, Scale: 1},
+		},
+		workspaceEdit: workspaceEditor{
+			Enabled:       true,
+			Strategy:      profile.WorkspaceStrategySequential,
+			MaxWorkspaces: 6,
+			GroupSize:     3,
+			MonitorOrder:  []string{"mon-a", "mon-b"},
+		},
+	}
+
+	x, y := findVisiblePosition(t, m.renderMain(), "Max workspaces")
+	updated, _ := m.updateMouse(mousePressAt(x, y))
+	got := updated.(Model)
+	if got.workspaceEdit.SelectedField != 2 {
+		t.Fatalf("expected visible click on Max workspaces to select field 2, got %d", got.workspaceEdit.SelectedField)
+	}
+	if got.workspaceEdit.MaxWorkspaces != 7 {
+		t.Fatalf("expected click on Max workspaces to increment value to 7, got %d", got.workspaceEdit.MaxWorkspaces)
+	}
+}
+
+func TestWorkspaceMouseIgnoresPreviewPaneInCompactLayout(t *testing.T) {
+	m := Model{
+		styles: newStyles(),
+		width:  80,
+		height: 24,
+		tab:    tabWorkspaces,
+		editOutputs: []editableOutput{
+			{Key: "mon-a", Name: "DP-1", Enabled: true, Scale: 1},
+			{Key: "mon-b", Name: "HDMI-A-1", Enabled: true, Scale: 1},
+		},
+		workspaceEdit: workspaceEditor{
+			Enabled:       true,
+			Strategy:      profile.WorkspaceStrategySequential,
+			MaxWorkspaces: 6,
+			GroupSize:     3,
+			MonitorOrder:  []string{"mon-a", "mon-b"},
+			SelectedField: 1,
+		},
+	}
+
+	x, y := findVisiblePosition(t, m.renderMain(), "HDMI-A-1: 4, 5, 6")
+	updated, _ := m.updateMouse(mousePressAt(x, y))
+	got := updated.(Model)
+	if got.workspaceEdit.SelectedField != 1 {
+		t.Fatalf("expected compact preview-pane click to keep selected field 1, got %d", got.workspaceEdit.SelectedField)
+	}
+	if got.workspaceEdit.MaxWorkspaces != 6 {
+		t.Fatalf("expected compact preview-pane click to leave workspace settings unchanged, got %d", got.workspaceEdit.MaxWorkspaces)
+	}
+}
+
+func TestLayoutMouseOpensScaleEditorAtVisibleField(t *testing.T) {
+	m := Model{
+		styles:         newStyles(),
+		width:          150,
+		height:         28,
+		tab:            tabLayout,
+		layoutFocus:    layoutFocusCanvas,
+		inspectorField: 0,
+		editOutputs: []editableOutput{{
+			Key:       "main",
+			Name:      "DP-1",
+			Enabled:   true,
+			Modes:     []string{"3840x2160@143.99Hz", "2560x1440@143.97Hz"},
+			ModeIndex: 0,
+			Width:     3840,
+			Height:    2160,
+			Refresh:   143.99,
+			Scale:     1.33,
+		}},
+	}
+
+	x, y := findVisiblePosition(t, m.renderMain(), "Scale")
+	updated, cmd := m.updateMouse(mousePressAt(x, y))
+	if cmd != nil {
+		if msg := cmd(); msg != nil {
+			updated, _ = updated.(Model).Update(msg)
+		}
+	}
+	got := updated.(Model)
+	if got.mode != modeNumericInput || got.input == nil || got.input.Kind != numericInputScale {
+		t.Fatalf("expected visible click on Scale to open numeric scale editor, got mode=%v input=%+v", got.mode, got.input)
+	}
+}
+
+func TestLayoutMouseOpensScaleEditorAtVisibleFieldInCompactLayout(t *testing.T) {
+	m := Model{
+		styles:         newStyles(),
+		width:          100,
+		height:         24,
+		tab:            tabLayout,
+		layoutFocus:    layoutFocusCanvas,
+		inspectorField: 0,
+		editOutputs: []editableOutput{{
+			Key:       "main",
+			Name:      "DP-1",
+			Enabled:   true,
+			Modes:     []string{"3840x2160@143.99Hz", "2560x1440@143.97Hz"},
+			ModeIndex: 0,
+			Width:     3840,
+			Height:    2160,
+			Refresh:   143.99,
+			Scale:     1.33,
+		}},
+	}
+
+	x, y := findVisiblePosition(t, m.renderMain(), "Scale")
+	updated, cmd := m.updateMouse(mousePressAt(x, y))
+	if cmd != nil {
+		if msg := cmd(); msg != nil {
+			updated, _ = updated.(Model).Update(msg)
+		}
+	}
+	got := updated.(Model)
+	if got.mode != modeNumericInput || got.input == nil || got.input.Kind != numericInputScale {
+		t.Fatalf("expected compact visible click on Scale to open numeric scale editor, got mode=%v input=%+v", got.mode, got.input)
 	}
 }
 
@@ -267,6 +476,49 @@ func TestActivateInspectorFieldOpensEditors(t *testing.T) {
 	}
 }
 
+func TestModePickerMouseSelectsVisibleMode(t *testing.T) {
+	base := Model{
+		styles:         newStyles(),
+		width:          120,
+		height:         28,
+		tab:            tabLayout,
+		layoutFocus:    layoutFocusInspector,
+		inspectorField: 1,
+		editOutputs: []editableOutput{{
+			Key:       "main",
+			Name:      "DP-1",
+			Enabled:   true,
+			Modes:     []string{"3840x2160@143.99Hz", "2560x1440@143.97Hz"},
+			ModeIndex: 0,
+			Width:     3840,
+			Height:    2160,
+			Refresh:   143.99,
+			Scale:     1.33,
+		}},
+	}
+
+	modeModel, _ := base.activateInspectorField()
+	m := modeModel.(Model)
+	if m.mode != modeModePicker || m.picker == nil {
+		t.Fatalf("expected mode picker to be active, got mode=%v picker=%+v", m.mode, m.picker)
+	}
+
+	x, y := findVisiblePosition(t, m.View(), "2560x1440@143.97Hz")
+	updated, cmd := m.updateMouse(mousePressAt(x, y))
+	if cmd != nil {
+		if msg := cmd(); msg != nil {
+			updated, _ = updated.(Model).Update(msg)
+		}
+	}
+	got := updated.(Model)
+	if got.mode != modeMain {
+		t.Fatalf("expected mode picker click to close dialog, got mode %v", got.mode)
+	}
+	if got.editOutputs[0].ModeIndex != 1 {
+		t.Fatalf("expected mode picker click to select second mode, got index %d", got.editOutputs[0].ModeIndex)
+	}
+}
+
 func TestCanvasLayoutPreservesWideMonitorAspect(t *testing.T) {
 	m := Model{
 		editOutputs: []editableOutput{
@@ -332,6 +584,31 @@ func TestOpenSaveDialogShowsExistingProfiles(t *testing.T) {
 	}
 	if len(got.saveDialog.List.Items()) != 2 {
 		t.Fatalf("expected 2 visible profiles, got %d", len(got.saveDialog.List.Items()))
+	}
+}
+
+func TestSaveDialogMouseSelectsVisibleProfile(t *testing.T) {
+	m := Model{
+		styles:   newStyles(),
+		width:    120,
+		height:   28,
+		profiles: []profile.Profile{testProfile("Laptop Home", 1), testProfile("Desk Dock", 2)},
+	}
+
+	updatedModel, _ := m.openSaveDialog()
+	got := updatedModel.(*Model)
+
+	x, y := findVisiblePosition(t, got.View(), "Desk Dock")
+	updated, _ := got.updateMouse(mousePressAt(x, y))
+	next := updated.(Model)
+	if next.saveDialog == nil {
+		t.Fatal("expected save dialog to remain open after profile click")
+	}
+	if next.saveDialog.List.Index() != 1 {
+		t.Fatalf("expected visible click on Desk Dock to select row 1, got %d", next.saveDialog.List.Index())
+	}
+	if next.saveDialog.Input.Value() != "Desk Dock" {
+		t.Fatalf("expected save dialog click to sync name input to Desk Dock, got %q", next.saveDialog.Input.Value())
 	}
 }
 
@@ -767,4 +1044,43 @@ func maxRenderedLineWidth(view string) int {
 		maxWidth = max(maxWidth, lipgloss.Width(line))
 	}
 	return maxWidth
+}
+
+func findVisiblePosition(t *testing.T, view string, text string) (int, int) {
+	t.Helper()
+
+	for y, line := range strings.Split(ansi.Strip(view), "\n") {
+		idx := strings.Index(line, text)
+		if idx >= 0 {
+			return lipgloss.Width(line[:idx]), y
+		}
+	}
+
+	t.Fatalf("expected rendered view to contain %q, got:\n%s", text, ansi.Strip(view))
+	return 0, 0
+}
+
+func mousePressAt(x, y int) tea.MouseMsg {
+	return tea.MouseMsg{
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonLeft,
+		X:      x,
+		Y:      y,
+	}
+}
+
+func testProfile(name string, outputCount int) profile.Profile {
+	outputs := make([]profile.OutputConfig, 0, outputCount)
+	for idx := 0; idx < outputCount; idx++ {
+		outputs = append(outputs, profile.OutputConfig{
+			Key:     fmt.Sprintf("%s-%d", name, idx),
+			Name:    fmt.Sprintf("DP-%d", idx+1),
+			Enabled: true,
+			Width:   1920,
+			Height:  1080,
+			Refresh: 60,
+			Scale:   1,
+		})
+	}
+	return profile.New(name, outputs)
 }

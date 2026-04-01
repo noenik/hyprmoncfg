@@ -146,7 +146,7 @@ func (m Model) footerLayout() footerLayout {
 		links: make([]footerLinkRegion, 0, len(items)),
 	}
 
-	cursor := leftWidth + gap + lipgloss.Width(help)
+	cursor := leftWidth + gap + lipgloss.Width(helpClean)
 	if info != "" {
 		cursor += 2
 	}
@@ -174,11 +174,12 @@ func (m Model) renderFooterBar() string {
 }
 
 func (m Model) footerRowY() int {
-	return m.terminalHeight() - 1
+	body := m.bodyRect()
+	return body.y + body.h
 }
 
 func (m Model) footerColumnX() int {
-	return 1
+	return m.appContentX()
 }
 
 func (m Model) footerLinkAt(x, y int) (footerLinkRegion, bool) {
