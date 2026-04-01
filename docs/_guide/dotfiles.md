@@ -28,11 +28,13 @@ chezmoi add ~/.config/hyprmoncfg
 
 That's it. Your profiles are now versioned and will be deployed to every machine where you run `chezmoi apply`.
 
-When you save a new profile or update an existing one:
+When you save a new profile or update an existing one, tell chezmoi to pick up the changes:
 
 ```bash
 chezmoi re-add ~/.config/hyprmoncfg
 ```
+
+(`re-add` updates files that chezmoi already tracks. You only need `add` for the initial setup.)
 
 ## Other dotfile managers
 

@@ -6,12 +6,12 @@ nav_order: 2
 
 ## Layout editor
 
-The layout tab is where you spend most of your time. It's split into two panes:
+When you launch `hyprmoncfg`, you land on the layout tab. This is where you arrange your monitors and tune their settings. The screen is split into two panes:
 
-- **Left**: a spatial canvas showing your monitors as draggable rectangles
-- **Right**: an inspector showing every property of the selected monitor
+- **Left**: a canvas showing your monitors as draggable rectangles, positioned the way Hyprland currently sees them
+- **Right**: an inspector showing every property of the selected monitor -- resolution, scale, position, transform, VRR, and more
 
-Drag monitors on the canvas to reposition them. The inspector updates in real time. When you need pixel-perfect placement, use the `Position X` and `Position Y` fields in the inspector.
+Drag monitors on the canvas to reposition them. The inspector updates in real time. When you need pixel-perfect placement, use the `Position X` and `Position Y` fields in the inspector instead of dragging.
 
 ![Layout editor]({{ '/assets/images/screenshots/layout-dark.png' | relative_url }})
 {: .screenshot }
@@ -46,7 +46,7 @@ Press `Enter` on any inspector field to edit it:
 - **Mode** opens a scrollable picker with every supported resolution and refresh rate
 - **Scale**, **Position X**, **Position Y** accept typed numeric values
 - **Transform**, **VRR** cycle through their options with Enter or scroll
-- **Mirror** lets you mirror the selected monitor to any other connected display. Set the Mode to match the source resolution for a crisp image -- mismatched resolutions cause Hyprland to upscale, which looks pixelated
+- **Mirror** lets you mirror the selected monitor to any other connected display. For a crisp image, set the mirrored monitor's Mode to match the source resolution. If the resolutions don't match, Hyprland upscales the image, which looks blurry
 
 ## Save dialog
 
@@ -61,19 +61,19 @@ Press `s` from the layout tab. You'll see a text input and the list of existing 
 
 ## Workspace planner
 
-The third tab lets you distribute workspaces across monitors. Three strategies:
+The third tab lets you distribute workspaces across monitors. Pick one of three strategies:
 
-| Strategy | What it does |
-|----------|-------------|
-| `sequential` | Groups workspaces in chunks (e.g., 1-3 on monitor A, 4-6 on monitor B) |
-| `interleave` | Round-robins workspaces across monitors (1 on A, 2 on B, 3 on A, ...) |
-| `manual` | You define explicit rules for each workspace |
+| Strategy | What it does | When to use it |
+|----------|-------------|----------------|
+| `sequential` | Groups workspaces in chunks (e.g., 1-3 on monitor A, 4-6 on monitor B) | You think of each monitor as having "its own" workspaces |
+| `interleave` | Round-robins workspaces across monitors (1 on A, 2 on B, 3 on A, ...) | You want next/previous workspace to alternate screens |
+| `manual` | You define explicit rules for each workspace | You need full control over exactly which workspace lives where |
 
-You can configure:
+You can also configure:
 
-- Whether workspace rules are enabled at all
-- Maximum workspace count
-- Group size for sequential mode
-- Monitor ordering
+- **Workspace rules on/off** -- disable them entirely if you manage workspaces yourself
+- **Max workspaces** -- how many workspaces to generate rules for
+- **Group size** (sequential only) -- how many consecutive workspaces to assign to each monitor before moving to the next. With 2 monitors and a group size of 3, monitor A gets 1-3, monitor B gets 4-6, and so on
+- **Monitor order** -- which monitor gets the first batch of workspaces. Drag to reorder
 
 The workspace plan is stored inside each profile. When the daemon applies a profile, it applies workspace rules too -- layout and workspace assignment in one shot.

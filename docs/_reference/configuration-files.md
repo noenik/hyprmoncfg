@@ -12,7 +12,11 @@ Profiles live in:
 ~/.config/hyprmoncfg/profiles/*.json
 ```
 
-Each profile is a single JSON file named after a slugified version of the profile name. These files are machine-owned -- they're written by the program, not designed for hand-editing. JSON was chosen for deterministic serialization and straightforward diffs.
+Each profile is a single JSON file. The filename is a simplified version of the profile name -- spaces become hyphens, special characters are dropped. For example, a profile named "Home Office" becomes `home-office.json`.
+
+These files are managed by hyprmoncfg. You can read them, but there's no reason to edit them by hand -- the TUI and CLI handle that for you.
+
+{% include alert.html type="warning" title="Every Profile File Is A Match Candidate" content="`hyprmoncfgd` scans every `*.json` file in this directory. Old backups, temporary experiments, and duplicate layouts are not ignored just because you forgot about them." %}
 
 Override the storage directory with `--config-dir`:
 
@@ -29,6 +33,16 @@ Each profile stores:
 - **Workspace settings**: strategy, max workspaces, group size, monitor order, explicit rules
 
 Monitors are identified by hardware key (`make|model|serial`), not connector name. This means your profiles survive connector swaps between boots.
+
+## Profile hygiene
+
+If you want predictable daemon behavior, keep this directory curated:
+
+- Create profiles for every real monitor scenario you expect auto-switching to cover
+- Keep one profile per real monitor setup you actually want auto-applied
+- Delete stale profiles instead of renaming them and leaving them in place
+- Store backups somewhere else if you do not want them considered during matching
+- Re-save a profile after major hardware changes instead of accumulating near-duplicates
 
 ## Hyprland targets
 
@@ -53,9 +67,9 @@ hyprmoncfgd --monitors-conf /path/to/monitors.conf --hypr-config /path/to/hyprla
 
 ## The source-chain check
 
-Before writing anything, hyprmoncfg parses `hyprland.conf` and checks that it actually sources the target `monitors.conf` file. This catches a common failure mode: a tool rewrites a config file that Hyprland is not reading, and nothing changes.
+Before writing anything, hyprmoncfg parses your `hyprland.conf` and confirms it contains a `source` line that includes the target `monitors.conf`. This catches a surprisingly common problem: a tool writes a config file that Hyprland never reads, so nothing happens and you're left wondering why.
 
-If the check fails, hyprmoncfg refuses to write and tells you what's wrong. You either add a `source` line to your `hyprland.conf` or point hyprmoncfg at the correct files.
+If the check fails, hyprmoncfg refuses to write and tells you exactly what's missing. The fix is usually one of two things: add `source = ~/.config/hypr/monitors.conf` to your `hyprland.conf`, or point hyprmoncfg at the files you're actually using with `--monitors-conf` and `--hypr-config`.
 
 ## What gets written
 

@@ -10,7 +10,7 @@ Configuring monitors in Hyprland means writing `monitor=` lines by hand. A 4K di
 
 Then it gets worse. You unplug your laptop, go to a conference, plug into a projector, and you're back to editing config files backstage before your talk. You come home, dock the laptop, and the layout is wrong again.
 
-Existing tools try to help but bring their own baggage: Python runtimes, GTK dependencies, fragile hotplug behavior. Some only do visual arrangement with no profiles. Others do profiles but have no editor. None of them verify that Hyprland is actually reading the file they're writing.
+Existing tools try to help but bring their own problems. Some need a Python runtime and GTK just to draw a layout. Others have no visual editor at all -- profiles are config files you write by hand. Some handle hotplug but break when connectors swap between boots. And none of them check whether Hyprland is actually reading the file they're writing to.
 
 ## What hyprmoncfg does differently
 
@@ -22,7 +22,7 @@ Existing tools try to help but bring their own baggage: Python runtimes, GTK dep
 
 **It verifies the source chain.** Before writing anything, hyprmoncfg checks that `hyprland.conf` actually sources the target `monitors.conf`. Other tools skip this and silently update files that Hyprland never reads.
 
-**One runtime dependency: Hyprland.** Two compiled Go binaries. No Python, no GTK, no GObject introspection, no D-Bus. Install them and you're done. They even work over SSH.
+**One runtime dependency: Hyprland.** Two compiled Go binaries. No Python, no GTK, no GObject introspection, no D-Bus. Install them and you're done. Since it's a TUI, it works over SSH too -- configure monitors on a headless machine from your laptop.
 
 ## How it compares
 
