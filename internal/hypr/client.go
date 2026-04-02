@@ -33,6 +33,11 @@ type VersionInfo struct {
 	Tag     string `json:"tag"`
 }
 
+type instanceInfo struct {
+	Instance string `json:"instance"`
+	WLSocket string `json:"wl_socket"`
+}
+
 type Client struct {
 	hyprctl string
 }
@@ -46,7 +51,10 @@ func NewClient() (*Client, error) {
 }
 
 func (c *Client) Monitors(ctx context.Context) ([]Monitor, error) {
-	cmd := exec.CommandContext(ctx, c.hyprctl, "-j", "monitors", "all")
+	cmd, err := c.commandContext(ctx, "-j", "monitors", "all")
+	if err != nil {
+		return nil, err
+	}
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("failed to query monitors: %w", err)
@@ -64,7 +72,10 @@ func (c *Client) Monitors(ctx context.Context) ([]Monitor, error) {
 }
 
 func (c *Client) Workspaces(ctx context.Context) ([]WorkspaceState, error) {
-	cmd := exec.CommandContext(ctx, c.hyprctl, "-j", "workspaces")
+	cmd, err := c.commandContext(ctx, "-j", "workspaces")
+	if err != nil {
+		return nil, err
+	}
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("failed to query workspaces: %w", err)
@@ -77,7 +88,10 @@ func (c *Client) Workspaces(ctx context.Context) ([]WorkspaceState, error) {
 }
 
 func (c *Client) WorkspaceRules(ctx context.Context) ([]WorkspaceRule, error) {
-	cmd := exec.CommandContext(ctx, c.hyprctl, "-j", "workspacerules")
+	cmd, err := c.commandContext(ctx, "-j", "workspacerules")
+	if err != nil {
+		return nil, err
+	}
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("failed to query workspace rules: %w", err)
@@ -90,7 +104,10 @@ func (c *Client) WorkspaceRules(ctx context.Context) ([]WorkspaceRule, error) {
 }
 
 func (c *Client) Version(ctx context.Context) (VersionInfo, error) {
-	cmd := exec.CommandContext(ctx, c.hyprctl, "-j", "version")
+	cmd, err := c.commandContext(ctx, "-j", "version")
+	if err != nil {
+		return VersionInfo{}, err
+	}
 	out, err := cmd.Output()
 	if err != nil {
 		return VersionInfo{}, fmt.Errorf("failed to query hyprctl version: %w", err)
@@ -111,7 +128,10 @@ func (c *Client) SupportsMonitorV2(ctx context.Context) (bool, error) {
 }
 
 func (c *Client) Reload(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, c.hyprctl, "reload")
+	cmd, err := c.commandContext(ctx, "reload")
+	if err != nil {
+		return err
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to reload Hyprland: %w (%s)", err, strings.TrimSpace(string(out)))
@@ -120,7 +140,10 @@ func (c *Client) Reload(ctx context.Context) error {
 }
 
 func (c *Client) KeywordMonitor(ctx context.Context, value string) error {
-	cmd := exec.CommandContext(ctx, c.hyprctl, "keyword", "monitor", value)
+	cmd, err := c.commandContext(ctx, "keyword", "monitor", value)
+	if err != nil {
+		return err
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed applying monitor keyword %q: %w (%s)", value, err, strings.TrimSpace(string(out)))
@@ -129,7 +152,10 @@ func (c *Client) KeywordMonitor(ctx context.Context, value string) error {
 }
 
 func (c *Client) KeywordWorkspace(ctx context.Context, value string) error {
-	cmd := exec.CommandContext(ctx, c.hyprctl, "keyword", "workspace", value)
+	cmd, err := c.commandContext(ctx, "keyword", "workspace", value)
+	if err != nil {
+		return err
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed applying workspace keyword %q: %w (%s)", value, err, strings.TrimSpace(string(out)))
@@ -139,7 +165,10 @@ func (c *Client) KeywordWorkspace(ctx context.Context, value string) error {
 
 func (c *Client) Dispatch(ctx context.Context, dispatcher string, args ...string) error {
 	allArgs := append([]string{"dispatch", dispatcher}, args...)
-	cmd := exec.CommandContext(ctx, c.hyprctl, allArgs...)
+	cmd, err := c.commandContext(ctx, allArgs...)
+	if err != nil {
+		return err
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed dispatch %q: %w (%s)", dispatcher, err, strings.TrimSpace(string(out)))
@@ -173,7 +202,10 @@ func (c *Client) Batch(ctx context.Context, commands []string) error {
 	if len(commands) == 0 {
 		return nil
 	}
-	cmd := exec.CommandContext(ctx, c.hyprctl, "--batch", strings.Join(commands, " ; "))
+	cmd, err := c.commandContext(ctx, "--batch", strings.Join(commands, " ; "))
+	if err != nil {
+		return err
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed hyprctl batch apply: %w (%s)", err, strings.TrimSpace(string(out)))
@@ -181,14 +213,67 @@ func (c *Client) Batch(ctx context.Context, commands []string) error {
 	return nil
 }
 
-func Socket2Path() (string, error) {
+func (c *Client) commandContext(ctx context.Context, args ...string) (*exec.Cmd, error) {
+	instance, err := c.resolveInstance(ctx)
+	if err != nil {
+		return nil, err
+	}
+	cmdArgs := append([]string{"--instance", instance}, args...)
+	return exec.CommandContext(ctx, c.hyprctl, cmdArgs...), nil
+}
+
+func (c *Client) resolveInstance(ctx context.Context) (string, error) {
+	if sig := strings.TrimSpace(os.Getenv("HYPRLAND_INSTANCE_SIGNATURE")); sig != "" {
+		return sig, nil
+	}
+	return c.discoverInstance(ctx)
+}
+
+func (c *Client) discoverInstance(ctx context.Context) (string, error) {
+	cmd := exec.CommandContext(ctx, c.hyprctl, "-j", "instances")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to query Hyprland instances: %w", err)
+	}
+	var instances []instanceInfo
+	if err := json.Unmarshal(out, &instances); err != nil {
+		return "", fmt.Errorf("failed to decode hyprctl instances JSON: %w", err)
+	}
+	return selectInstance(instances, strings.TrimSpace(os.Getenv("WAYLAND_DISPLAY")))
+}
+
+func selectInstance(instances []instanceInfo, waylandDisplay string) (string, error) {
+	if len(instances) == 0 {
+		return "", errors.New("no running Hyprland instances found")
+	}
+	if waylandDisplay != "" {
+		matches := make([]instanceInfo, 0, len(instances))
+		for _, inst := range instances {
+			if inst.WLSocket == waylandDisplay {
+				matches = append(matches, inst)
+			}
+		}
+		if len(matches) == 1 {
+			return matches[0].Instance, nil
+		}
+		if len(matches) > 1 {
+			return "", fmt.Errorf("multiple Hyprland instances match WAYLAND_DISPLAY=%q", waylandDisplay)
+		}
+	}
+	if len(instances) == 1 {
+		return instances[0].Instance, nil
+	}
+	return "", errors.New("multiple Hyprland instances found; set HYPRLAND_INSTANCE_SIGNATURE or WAYLAND_DISPLAY")
+}
+
+func (c *Client) socket2Path(ctx context.Context) (string, error) {
 	runtimeDir := os.Getenv("XDG_RUNTIME_DIR")
 	if runtimeDir == "" {
 		return "", errors.New("XDG_RUNTIME_DIR is not set")
 	}
-	sig := os.Getenv("HYPRLAND_INSTANCE_SIGNATURE")
-	if sig == "" {
-		return "", errors.New("HYPRLAND_INSTANCE_SIGNATURE is not set")
+	sig, err := c.resolveInstance(ctx)
+	if err != nil {
+		return "", err
 	}
 	return filepath.Join(runtimeDir, "hypr", sig, ".socket2.sock"), nil
 }
@@ -201,7 +286,7 @@ func (c *Client) SubscribeMonitorEvents(ctx context.Context) (<-chan Event, <-ch
 		defer close(events)
 		defer close(errorsCh)
 
-		socketPath, err := Socket2Path()
+		socketPath, err := c.socket2Path(ctx)
 		if err != nil {
 			errorsCh <- err
 			return

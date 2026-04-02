@@ -373,6 +373,9 @@ func TestEngineApplyAndRevertReplayWorkspacePlacement(t *testing.T) {
 
 	hyprctlScript := `#!/usr/bin/env bash
 set -eu
+if [ "${1-}" = "--instance" ]; then
+  shift 2
+fi
 cmd1="${1-}"
 cmd2="${2-}"
 cmd3="${3-}"
@@ -422,6 +425,7 @@ exit 1
 	}
 
 	t.Setenv("HYPRCTL_LOG", logPath)
+	t.Setenv("HYPRLAND_INSTANCE_SIGNATURE", "sig-test")
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	client, err := hypr.NewClient()
