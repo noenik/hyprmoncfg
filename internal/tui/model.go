@@ -26,6 +26,7 @@ const (
 	modeConfirm
 	modeModePicker
 	modeNumericInput
+	modeProfileExecInput
 )
 
 type mainTab int
@@ -52,8 +53,9 @@ type refreshMsg struct {
 }
 
 type saveMsg struct {
-	name string
-	err  error
+	name       string
+	err        error
+	profileTab bool
 }
 
 type deleteMsg struct {
@@ -214,6 +216,7 @@ type Model struct {
 	saveOverwrite string
 	picker        *modePickerState
 	input         *numericInputState
+	execInput     *profileExecInputState
 	drag          *canvasDragState
 	snap          *snapHintState
 	snapSeq       int
@@ -224,6 +227,7 @@ type Model struct {
 	dirty            bool
 	draftSaved       bool
 	draftProfileName string
+	draftExec        string
 	daemonOK         bool
 
 	width  int
@@ -277,6 +281,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.input != nil {
 			m.input.Input.Width = m.numericInputWidthFor(m.input.Kind)
 		}
+		if m.execInput != nil {
+			m.execInput.Input.Width = clampInt(m.modalMaxWidth()-16, 24, 72)
+		}
 		return m, nil
 
 	case refreshMsg:
@@ -303,6 +310,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setStatusErr(msg.err.Error())
 			m.mode = modeMain
 			return m, nil
+		}
+		if msg.profileTab {
+			m.setStatusOK(fmt.Sprintf("Saved profile %q", msg.name))
+			return m, m.refreshCmd()
 		}
 		action := saveActionOnly
 		if m.saveDialog != nil {
@@ -339,6 +350,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if strings.EqualFold(strings.TrimSpace(msg.name), strings.TrimSpace(m.draftProfileName)) {
 			m.draftProfileName = ""
+			m.draftExec = ""
 		}
 		m.setStatusOK(fmt.Sprintf("Deleted profile %q", msg.name))
 		m.selectedProfile = clampIndex(m.selectedProfile, len(m.profiles))
@@ -369,6 +381,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.markClean()
 		m.draftProfileName = ""
+		m.draftExec = ""
 		m.setStatusOK("Configuration reverted: " + msg.reason)
 		return m, m.refreshCmd()
 
@@ -400,6 +413,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateModePickerKeys(msg)
 		case modeNumericInput:
 			return m.updateNumericInputKeys(msg)
+		case modeProfileExecInput:
+			return m.updateProfileExecInputKeys(msg)
 		default:
 			return m.updateMainKeys(msg)
 		}
@@ -420,6 +435,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.input != nil {
 			var cmd tea.Cmd
 			m.input.Input, cmd = m.input.Input.Update(msg)
+			return m, cmd
+		}
+	case modeProfileExecInput:
+		if m.execInput != nil {
+			var cmd tea.Cmd
+			m.execInput.Input, cmd = m.execInput.Input.Update(msg)
 			return m, cmd
 		}
 	}
@@ -443,9 +464,17 @@ func (m Model) updateMainKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		m.resetRequested = true
 		m.draftProfileName = ""
+		m.draftExec = ""
 		m.markClean()
 		return m, m.refreshCmd()
 	case "s":
+		if m.tab == tabProfiles {
+			if len(m.profiles) == 0 {
+				m.setStatusErr("No profiles to save")
+				return m, nil
+			}
+			return m, m.saveProfileCmd(m.profiles[m.selectedProfile])
+		}
 		return m.openSaveDialog()
 	case "a":
 		if m.tab == tabProfiles {
@@ -532,6 +561,12 @@ func (m Model) updateProfileKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.selectedProfile = clampIndex(m.selectedProfile-1, len(m.profiles))
 	case "down", "j":
 		m.selectedProfile = clampIndex(m.selectedProfile+1, len(m.profiles))
+	case "e":
+		if len(m.profiles) == 0 {
+			m.setStatusErr("No profiles to edit")
+			return m, nil
+		}
+		return m, m.openProfileExecInput()
 	case "d":
 		if len(m.profiles) == 0 {
 			m.setStatusErr("No profiles to delete")
@@ -604,6 +639,7 @@ func (m Model) updateConfirmKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "y", "enter":
 		if target := strings.TrimSpace(m.pending.target); target != "" && target != "draft" {
 			m.draftProfileName = target
+			m.postApply(m.profiles[m.selectedProfile])
 		}
 		m.mode = modeMain
 		m.pending = nil
@@ -630,6 +666,8 @@ func (m Model) View() string {
 		return m.renderModalScreen(m.renderModePicker())
 	case modeNumericInput:
 		return m.renderModalScreen(m.renderNumericInput())
+	case modeProfileExecInput:
+		return m.renderModalScreen(m.renderProfileExecInput())
 	default:
 		return m.renderMain()
 	}
@@ -939,6 +977,14 @@ func (m Model) renderProfilesView(height int) string {
 			detailLines = append(detailLines, line)
 		}
 
+		execDisplay := selected.Exec
+		if execDisplay == "" {
+			execDisplay = "<not set>"
+		}
+
+		detailLines = append(detailLines, "")
+		detailLines = append(detailLines, fmt.Sprintf("Exec: %s", execDisplay))
+
 		preview := profile.WorkspacePreview(selected.Workspaces, selected.Outputs, m.monitors)
 		if len(preview) > 0 {
 			detailLines = append(detailLines, "")
@@ -1230,8 +1276,10 @@ func (m *Model) loadLiveState() {
 	m.workspaceEdit = workspaceEditorFromSettings(settings, m.editOutputs)
 	if matched, ok := profile.ExactStateMatch(m.profiles, m.monitors, m.workspaceRules); ok {
 		m.draftProfileName = matched.Name
+		m.draftExec = matched.Exec
 	} else {
 		m.draftProfileName = ""
+		m.draftExec = ""
 	}
 
 	// Preserve fields that hyprctl cannot accurately report, unless the
@@ -1305,6 +1353,7 @@ func (m *Model) loadProfile(p profile.Profile) {
 	m.dirty = true
 	m.draftSaved = true
 	m.draftProfileName = p.Name
+	m.draftExec = p.Exec
 	m.setStatusOK(fmt.Sprintf("Loaded profile %q into editor", p.Name))
 
 	m.revalidate()
@@ -1344,13 +1393,18 @@ func (m *Model) syncSelections() {
 }
 
 func (m Model) profileExists(name string) bool {
+	_, ok := m.profileByName(name)
+	return ok
+}
+
+func (m Model) profileByName(name string) (profile.Profile, bool) {
 	name = strings.TrimSpace(strings.ToLower(name))
 	for _, prof := range m.profiles {
 		if strings.TrimSpace(strings.ToLower(prof.Name)) == name {
-			return true
+			return prof, true
 		}
 	}
-	return false
+	return profile.Profile{}, false
 }
 
 func (m Model) hasMirroredOutputs() bool {
@@ -1687,8 +1741,19 @@ func (m *Model) moveWorkspaceOrder(delta int) {
 func (m Model) currentProfile(name string) profile.Profile {
 	p := profile.New(name, m.currentProfileOutputs())
 	p.Workspaces = m.workspaceEdit.settings()
+	p.Exec = m.currentProfileExec(name)
 	p.Normalize()
 	return p
+}
+
+func (m Model) currentProfileExec(name string) string {
+	if exec := strings.TrimSpace(m.draftExec); exec != "" {
+		return exec
+	}
+	if existing, ok := m.profileByName(name); ok {
+		return existing.Exec
+	}
+	return ""
 }
 
 func (m Model) currentProfileOutputs() []profile.OutputConfig {
@@ -1756,6 +1821,16 @@ func (m Model) saveCmd(p profile.Profile) tea.Cmd {
 	}
 }
 
+func (m Model) saveProfileCmd(p profile.Profile) tea.Cmd {
+	store := m.store
+	return func() tea.Msg {
+		if err := store.Save(p); err != nil {
+			return saveMsg{name: p.Name, err: err, profileTab: true}
+		}
+		return saveMsg{name: p.Name, profileTab: true}
+	}
+}
+
 func (m Model) deleteCmd(name string) tea.Cmd {
 	store := m.store
 	return func() tea.Msg {
@@ -1777,12 +1852,19 @@ func (m Model) applyCmd(p profile.Profile) tea.Cmd {
 		if err != nil {
 			return applyMsg{target: p.Name, err: err}
 		}
-		snapshot, err := engine.Apply(ctx, p, monitors)
+		snapshot, err := engine.Apply(ctx, p, monitors, apply.ApplyModeInteractive)
 		if err != nil {
 			return applyMsg{target: p.Name, err: err}
 		}
 		return applyMsg{target: p.Name, snapshot: snapshot}
 	}
+}
+
+func (m Model) postApply(p profile.Profile) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	return m.engine.PostApply(ctx, p)
 }
 
 func (m Model) revertCmd(snapshot apply.RevertState, reason string) tea.Cmd {
