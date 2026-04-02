@@ -213,6 +213,8 @@ type Model struct {
 
 	width  int
 	height int
+
+	layoutErr		error
 }
 
 const defaultWorkspaceGroupSize = 3
@@ -453,7 +455,7 @@ func (m Model) updateMainKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
-func (m Model) updateLayoutKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) updateLayoutKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if len(m.editOutputs) == 0 {
 		return m, nil
 	}
@@ -534,6 +536,7 @@ func (m Model) updateLayoutKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.markDirty()
+		m.revalidate()
 		return m, cmd
 	}
 
@@ -547,12 +550,17 @@ func (m Model) updateLayoutKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "right", "l", "+", "=":
 		m.adjustInspectorField(1)
 	case " ", "enter":
-		return m.activateInspectorField()
+		m, cmd := m.activateInspectorField()
+		if mod, ok := m.(*Model); ok {
+			mod.revalidate()
+		}
+		return m, cmd
 	default:
 		return m, nil
 	}
 
 	m.markDirty()
+	m.revalidate()
 	return m, nil
 }
 
@@ -1300,6 +1308,8 @@ func (m *Model) loadLiveState() {
 	m.input = nil
 	m.drag = nil
 	m.markClean()
+
+	m.revalidate()
 }
 
 func (m *Model) loadProfile(p profile.Profile) {
@@ -1319,6 +1329,8 @@ func (m *Model) loadProfile(p profile.Profile) {
 	m.draftSaved = true
 	m.draftProfileName = p.Name
 	m.setStatusOK(fmt.Sprintf("Loaded profile %q into editor", p.Name))
+
+	m.revalidate()
 }
 
 // recoverMirroredIdentity restores Make/Model/Serial/Key for monitors whose
@@ -1548,6 +1560,7 @@ func (m *Model) adjustInspectorField(delta int) {
 		}
 		output.MirrorOf = targets[wrapIndex(current+delta, len(targets))]
 	}
+	m.revalidate()
 }
 
 func (m *Model) adjustWorkspaceField(delta int) {
@@ -2194,6 +2207,10 @@ func (m Model) canvasCardStyle(output editableOutput, selected bool) canvasCardC
 			muted:  p.cardSelectedMuted,
 		}
 	}
+	if m.layoutErr != nil && m.isOutputOverlapping(output) {
+		colors.border = "#FF0000"
+		colors.fg = "#FF0000"
+	}
 	return colors
 }
 
@@ -2614,4 +2631,29 @@ func boolToVRR(v bool) int {
 		return 1
 	}
 	return 0
+}
+
+func (m Model) isOutputOverlapping(o editableOutput) bool {
+	if !o.Enabled || o.MirrorOf != "" {
+		return false
+	}
+	w1, h1 := o.logicalSize()
+	x1_1, y1_1 := o.X, o.Y
+	x2_1, y2_1 := o.X+w1, o.Y+h1
+
+	for _, other := range m.editOutputs {
+		if other.Name == o.Name || !other.Enabled || other.MirrorOf != "" {
+			continue
+		}
+
+		w2, h2 := other.logicalSize()
+		x1_2, y1_2 := other.X, other.Y
+		x2_2, y2_2 := other.X+w2, other.Y+h2
+
+		if x1_1 < x2_2 && x2_1 > x1_2 &&
+			y1_1 < y2_2 && y2_1 > y1_2 {
+			return true
+		}
+	}
+	return false
 }
