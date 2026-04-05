@@ -20,6 +20,8 @@ If yours doesn't, add one now. hyprmoncfg writes your monitor layout to `monitor
 
 You don't need to create `monitors.conf` yourself -- hyprmoncfg creates it when you apply your first profile.
 
+Treat `monitors.conf` as generated output. hyprmoncfg rewrites it on every apply, so keep unrelated Hyprland settings in other sourced files.
+
 If your config files live somewhere other than the defaults:
 
 ```bash

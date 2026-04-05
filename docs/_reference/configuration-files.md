@@ -75,6 +75,10 @@ If the check fails, hyprmoncfg refuses to write and tells you exactly what's mis
 
 When you apply a profile (via TUI, CLI, or daemon), hyprmoncfg writes `monitors.conf` with either `monitorv2 { }` blocks (Hyprland 0.50+) or legacy `monitor = ` lines, depending on your Hyprland version. Workspace rules are included when workspace planning is enabled in the profile.
 
+`monitors.conf` is generated output. hyprmoncfg fully manages and rewrites the target file on every apply.
+
+Do not put unrelated Hyprland settings in that file. Keep blocks like `render`, `cursor`, `misc`, and `env` in other sourced config files.
+
 The file is written atomically (temp file + rename) to prevent partial writes from corrupting your config.
 
 ## Portability
