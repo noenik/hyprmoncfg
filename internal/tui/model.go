@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
@@ -246,7 +247,9 @@ func NewModel(client *hypr.Client, store *profile.Store, monitorsConfPath string
 			Client:             client,
 			MonitorsConfPath:   monitorsConfPath,
 			HyprlandConfigPath: hyprlandConfigPath,
-			Logf:               func(string, ...any) {},
+			Logf:               func(format string, args ...any) {
+				fmt.Fprintf(os.Stderr, format, args...)
+			},
 		},
 		openURL:     openExternalURL,
 		styles:      newStyles(),
