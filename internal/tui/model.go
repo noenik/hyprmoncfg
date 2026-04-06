@@ -92,6 +92,7 @@ type pendingApply struct {
 
 type editableOutput struct {
 	Key             string
+	MatchKey        string
 	Name            string
 	Description     string
 	Make            string
@@ -1231,12 +1232,13 @@ func (m *Model) loadLiveState() {
 		selectedKey = prevOutputs[m.selectedOutput].Key
 	}
 	m.editOutputs = make([]editableOutput, 0, len(m.monitors))
+	matchCounts := hypr.MonitorMatchCounts(m.monitors)
 	nameToKey := make(map[string]string, len(m.monitors))
 	for _, monitor := range m.monitors {
-		nameToKey[monitor.Name] = monitor.HardwareKey()
+		nameToKey[monitor.Name] = hypr.MonitorOutputKey(monitor, matchCounts)
 	}
 	for _, monitor := range m.monitors {
-		output := editableOutputFromMonitor(monitor)
+		output := editableOutputFromMonitor(monitor, matchCounts)
 		if output.MirrorOf != "" {
 			if key, ok := nameToKey[output.MirrorOf]; ok {
 				output.MirrorOf = key
@@ -1271,7 +1273,7 @@ func (m *Model) loadLiveState() {
 func (m *Model) loadProfile(p profile.Profile) {
 	outputs := make([]editableOutput, 0, len(p.Outputs))
 	for _, saved := range p.Outputs {
-		live, ok := m.findLiveMonitor(saved.Key, saved.Name)
+		live, ok := m.findLiveMonitor(saved)
 		outputs = append(outputs, editableOutputFromProfile(saved, live, ok))
 	}
 	m.editOutputs = outputs
@@ -1600,6 +1602,7 @@ func (m *Model) moveWorkspaceOrder(delta int) {
 func (m Model) currentProfile(name string) profile.Profile {
 	p := profile.New(name, m.currentProfileOutputs())
 	p.Workspaces = m.workspaceEdit.settings()
+	p.Normalize()
 	return p
 }
 
@@ -1812,13 +1815,8 @@ func (m Model) outputLabelForKey(key string) string {
 	return outputDisplayLabel(key, m.currentProfileOutputs())
 }
 
-func (m Model) findLiveMonitor(key, name string) (hypr.Monitor, bool) {
-	for _, monitor := range m.monitors {
-		if monitor.HardwareKey() == key || monitor.Name == name {
-			return monitor, true
-		}
-	}
-	return hypr.Monitor{}, false
+func (m Model) findLiveMonitor(output profile.OutputConfig) (hypr.Monitor, bool) {
+	return profile.NewMonitorResolver(m.monitors).ResolveOutput(output)
 }
 
 func (m *Model) setStatusErr(msg string) {
@@ -1845,9 +1843,10 @@ func (m *Model) markClean() {
 	m.draftSaved = false
 }
 
-func editableOutputFromMonitor(m hypr.Monitor) editableOutput {
+func editableOutputFromMonitor(m hypr.Monitor, matchCounts map[string]int) editableOutput {
 	output := editableOutput{
-		Key:             m.HardwareKey(),
+		Key:             hypr.MonitorOutputKey(m, matchCounts),
+		MatchKey:        m.HardwareKey(),
 		Name:            m.Name,
 		Description:     m.Description,
 		Make:            m.Make,
@@ -1884,6 +1883,7 @@ func editableOutputFromMonitor(m hypr.Monitor) editableOutput {
 func editableOutputFromProfile(saved profile.OutputConfig, live hypr.Monitor, hasLive bool) editableOutput {
 	output := editableOutput{
 		Key:       saved.Key,
+		MatchKey:  saved.MatchIdentity(),
 		Name:      saved.Name,
 		Make:      saved.Make,
 		Model:     saved.Model,
@@ -2054,6 +2054,7 @@ func (o editableOutput) DisplayMode() string {
 func (o editableOutput) profileOutput() profile.OutputConfig {
 	return profile.OutputConfig{
 		Key:       o.Key,
+		MatchKey:  o.MatchKey,
 		Name:      o.Name,
 		Make:      o.Make,
 		Model:     o.Model,

@@ -11,6 +11,7 @@ import (
 
 type OutputConfig struct {
 	Key       string  `json:"key"`
+	MatchKey  string  `json:"match_key,omitempty"`
 	Name      string  `json:"name"`
 	Make      string  `json:"make,omitempty"`
 	Model     string  `json:"model,omitempty"`
@@ -69,6 +70,7 @@ func New(name string, outputs []OutputConfig) Profile {
 		UpdatedAt: now,
 		Outputs:   append([]OutputConfig(nil), outputs...),
 	}
+	p.normalizeIdentityRefs()
 	p.SortOutputs()
 	return p
 }
@@ -78,9 +80,10 @@ func FromMonitors(name string, monitors []hypr.Monitor) Profile {
 }
 
 func FromState(name string, monitors []hypr.Monitor, rules []hypr.WorkspaceRule) Profile {
+	matchCounts := hypr.MonitorMatchCounts(monitors)
 	nameToKey := make(map[string]string, len(monitors))
 	for _, m := range monitors {
-		nameToKey[m.Name] = m.HardwareKey()
+		nameToKey[m.Name] = hypr.MonitorOutputKey(m, matchCounts)
 	}
 
 	outputs := make([]OutputConfig, 0, len(monitors))
@@ -90,7 +93,8 @@ func FromState(name string, monitors []hypr.Monitor, rules []hypr.WorkspaceRule)
 			mirrorOf = nameToKey[m.MirrorOf]
 		}
 		outputs = append(outputs, OutputConfig{
-			Key:       m.HardwareKey(),
+			Key:       hypr.MonitorOutputKey(m, matchCounts),
+			MatchKey:  m.HardwareKey(),
 			Name:      m.Name,
 			Make:      m.Make,
 			Model:     m.Model,
@@ -110,6 +114,7 @@ func FromState(name string, monitors []hypr.Monitor, rules []hypr.WorkspaceRule)
 	}
 	p := New(name, outputs)
 	p.Workspaces = WorkspaceSettingsFromHypr(monitors, rules)
+	p.normalizeIdentityRefs()
 	return p
 }
 
@@ -174,6 +179,26 @@ func (o OutputConfig) NormalizedMode() string {
 		return strings.TrimSpace(o.Mode)
 	}
 	return hypr.FormatMode(o.Width, o.Height, o.Refresh)
+}
+
+func (o OutputConfig) MatchIdentity() string {
+	matchKey := strings.TrimSpace(o.MatchKey)
+	if matchKey != "" {
+		return matchKey
+	}
+	if matchKey = outputMatchKeyFromFields(o); matchKey != "" {
+		return matchKey
+	}
+	return strings.TrimSpace(o.Key)
+}
+
+func (p *Profile) normalizeIdentityRefs() {
+	normalizeIdentityRefs(p.Outputs, &p.Workspaces)
+}
+
+func (p *Profile) Normalize() {
+	p.normalizeIdentityRefs()
+	p.SortOutputs()
 }
 
 func boolToVRR(v bool) int {

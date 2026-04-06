@@ -10,21 +10,23 @@ import (
 )
 
 func MatchScore(p Profile, monitors []hypr.Monitor) int {
+	p.normalizeIdentityRefs()
 	if len(monitors) == 0 || len(p.Outputs) == 0 {
 		return 0
 	}
 
-	connected := make(map[string]struct{}, len(monitors))
+	connected := make(map[string]int, len(monitors))
 	for _, m := range monitors {
-		connected[m.HardwareKey()] = struct{}{}
+		connected[m.HardwareKey()]++
 	}
 
-	profileEnabled := make(map[string]struct{})
-	profileKnown := make(map[string]struct{})
+	profileEnabled := make(map[string]int, len(p.Outputs))
+	profileKnown := make(map[string]int, len(p.Outputs))
 	for _, o := range p.Outputs {
-		profileKnown[o.Key] = struct{}{}
+		matchKey := o.MatchIdentity()
+		profileKnown[matchKey]++
 		if o.Enabled {
-			profileEnabled[o.Key] = struct{}{}
+			profileEnabled[matchKey]++
 		}
 	}
 	if len(profileEnabled) == 0 {
@@ -32,30 +34,27 @@ func MatchScore(p Profile, monitors []hypr.Monitor) int {
 	}
 
 	enabledMatch := 0
-	for key := range connected {
-		if _, ok := profileEnabled[key]; ok {
-			enabledMatch++
+	disabledMatch := 0
+	for key, connectedCount := range connected {
+		enabledForKey := min(connectedCount, profileEnabled[key])
+		enabledMatch += enabledForKey
+
+		disabledKnown := profileKnown[key] - profileEnabled[key]
+		if disabledKnown > 0 {
+			disabledMatch += min(connectedCount-enabledForKey, disabledKnown)
 		}
 	}
 	if enabledMatch == 0 {
 		return 0
 	}
 
-	disabledMatch := 0
-	for key := range connected {
-		if _, inKnown := profileKnown[key]; inKnown {
-			if _, inEnabled := profileEnabled[key]; !inEnabled {
-				disabledMatch++
-			}
-		}
+	missingFromCurrent := 0
+	for key, wanted := range profileEnabled {
+		missingFromCurrent += max(0, wanted-connected[key])
 	}
-
-	missingFromCurrent := len(profileEnabled) - enabledMatch
 	unknownCurrent := 0
-	for key := range connected {
-		if _, ok := profileKnown[key]; !ok {
-			unknownCurrent++
-		}
+	for key, connectedCount := range connected {
+		unknownCurrent += max(0, connectedCount-profileKnown[key])
 	}
 
 	// High reward for enabled match, moderate reward for disabled match,
@@ -114,6 +113,8 @@ func ExactStateMatch(profiles []Profile, monitors []hypr.Monitor, rules []hypr.W
 }
 
 func profilesShareEffectiveState(a, b Profile, monitors []hypr.Monitor) bool {
+	a.normalizeIdentityRefs()
+	b.normalizeIdentityRefs()
 	if !outputsShareEffectiveState(a.Outputs, b.Outputs) {
 		return false
 	}

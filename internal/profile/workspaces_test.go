@@ -35,6 +35,41 @@ func TestGeneratedSequentialWorkspaceRules(t *testing.T) {
 	}
 }
 
+func TestNormalizeAssignsUniqueKeysToDuplicateOutputs(t *testing.T) {
+	legacyKey := "vie|c24pulse|0x01010101"
+	prof := Profile{
+		Name: "desk",
+		Outputs: []OutputConfig{
+			{Key: legacyKey, Name: "DP-5", Make: "VIE", Model: "C24PULSE", Serial: "0x01010101", Enabled: true, Scale: 1},
+			{Key: legacyKey, Name: "DP-6", Make: "VIE", Model: "C24PULSE", Serial: "0x01010101", Enabled: true, Scale: 1},
+		},
+		Workspaces: WorkspaceSettings{
+			Enabled:      true,
+			Strategy:     WorkspaceStrategyManual,
+			MonitorOrder: []string{legacyKey, legacyKey},
+			Rules: []WorkspaceRule{
+				{Workspace: "1", OutputKey: legacyKey, OutputName: "DP-5"},
+				{Workspace: "2", OutputKey: legacyKey, OutputName: "DP-6"},
+			},
+		},
+	}
+
+	prof.Normalize()
+
+	if prof.Outputs[0].Key == prof.Outputs[1].Key {
+		t.Fatalf("expected duplicate outputs to receive distinct keys, got %+v", prof.Outputs)
+	}
+	if prof.Outputs[0].MatchKey != legacyKey || prof.Outputs[1].MatchKey != legacyKey {
+		t.Fatalf("expected duplicate outputs to preserve shared match key, got %+v", prof.Outputs)
+	}
+	if prof.Workspaces.MonitorOrder[0] == prof.Workspaces.MonitorOrder[1] {
+		t.Fatalf("expected monitor order to be rewritten to distinct keys, got %v", prof.Workspaces.MonitorOrder)
+	}
+	if prof.Workspaces.Rules[0].OutputKey == prof.Workspaces.Rules[1].OutputKey {
+		t.Fatalf("expected workspace rules to target distinct outputs, got %+v", prof.Workspaces.Rules)
+	}
+}
+
 func TestGeneratedInterleaveWorkspaceRules(t *testing.T) {
 	monitors := []hypr.Monitor{
 		{Name: "DP-1", Make: "Dell", Model: "U2720Q", Serial: "A1", X: 0},

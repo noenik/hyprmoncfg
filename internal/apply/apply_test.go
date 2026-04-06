@@ -114,6 +114,32 @@ func TestWorkspaceCommandsForProfileIncludeKeywordAndDispatch(t *testing.T) {
 	}
 }
 
+func TestCommandsForProfileResolveDuplicateMonitorsByConnector(t *testing.T) {
+	monitors := []hypr.Monitor{
+		{Name: "DP-5", Description: "VIE C24PULSE 0x01010101", Make: "VIE", Model: "C24PULSE", Serial: "0x01010101"},
+		{Name: "DP-6", Description: "VIE C24PULSE 0x01010101", Make: "VIE", Model: "C24PULSE", Serial: "0x01010101"},
+	}
+	legacyKey := monitors[0].HardwareKey()
+	p := profile.New("desk", []profile.OutputConfig{
+		{Key: legacyKey, Name: "DP-5", Enabled: true, Width: 1920, Height: 1080, Refresh: 75, X: 0, Y: 0, Scale: 1},
+		{Key: legacyKey, Name: "DP-6", Enabled: true, Width: 1920, Height: 1080, Refresh: 75, X: 1920, Y: 0, Scale: 1},
+	})
+
+	cmds, err := CommandsForProfile(p, monitors)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cmds) != 2 {
+		t.Fatalf("expected 2 commands, got %d: %v", len(cmds), cmds)
+	}
+	if !strings.HasPrefix(cmds[0], "DP-5,") {
+		t.Fatalf("expected first command to target DP-5, got %q", cmds[0])
+	}
+	if !strings.HasPrefix(cmds[1], "DP-6,") {
+		t.Fatalf("expected second command to target DP-6, got %q", cmds[1])
+	}
+}
+
 func TestValidateLayoutRejectsOverlaps(t *testing.T) {
 	outputs := []profile.OutputConfig{
 		{
@@ -191,6 +217,45 @@ func TestRenderHyprlandConfigUsesMonitorV2WithWorkspaceRules(t *testing.T) {
 	}
 	if !strings.Contains(rendered, "persistent:true\nworkspace = 2, monitor:desc:Microstep MPG321UR-QD") {
 		t.Fatalf("expected workspace rules to be separated by a single newline, got:\n%s", rendered)
+	}
+}
+
+func TestRenderHyprlandConfigUsesConnectorsForAmbiguousDuplicateMonitors(t *testing.T) {
+	monitors := []hypr.Monitor{
+		{Name: "DP-5", Description: "VIE C24PULSE 0x01010101", Make: "VIE", Model: "C24PULSE", Serial: "0x01010101"},
+		{Name: "DP-6", Description: "VIE C24PULSE 0x01010101", Make: "VIE", Model: "C24PULSE", Serial: "0x01010101"},
+	}
+	legacyKey := monitors[0].HardwareKey()
+	p := profile.New("desk", []profile.OutputConfig{
+		{Key: legacyKey, Name: "DP-5", Enabled: true, Width: 1920, Height: 1080, Refresh: 75, X: 0, Y: 0, Scale: 1},
+		{Key: legacyKey, Name: "DP-6", Enabled: true, Width: 1920, Height: 1080, Refresh: 75, X: 1920, Y: 0, Scale: 1},
+	})
+	p.Workspaces = profile.WorkspaceSettings{
+		Enabled:  true,
+		Strategy: profile.WorkspaceStrategyManual,
+		Rules: []profile.WorkspaceRule{
+			{Workspace: "1", OutputKey: legacyKey, OutputName: "DP-5", Default: true, Persistent: true},
+			{Workspace: "2", OutputKey: legacyKey, OutputName: "DP-6", Default: true, Persistent: true},
+		},
+	}
+	p.Normalize()
+
+	rendered, err := RenderHyprlandConfig(p, monitors, true)
+	if err != nil {
+		t.Fatalf("unexpected render error: %v", err)
+	}
+	for _, want := range []string{
+		"output = DP-5",
+		"output = DP-6",
+		"workspace = 1, monitor:DP-5, default:true, persistent:true",
+		"workspace = 2, monitor:DP-6, default:true, persistent:true",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("expected duplicate-monitor render to contain %q, got:\n%s", want, rendered)
+		}
+	}
+	if strings.Contains(rendered, "output = desc:VIE C24PULSE 0x01010101") {
+		t.Fatalf("expected duplicate monitors to avoid desc selectors, got:\n%s", rendered)
 	}
 }
 

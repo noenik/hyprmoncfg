@@ -60,6 +60,7 @@ func (s *Store) Save(p Profile) error {
 	if err := s.Ensure(); err != nil {
 		return err
 	}
+	p.normalizeIdentityRefs()
 	if err := p.Validate(); err != nil {
 		return err
 	}
@@ -120,6 +121,7 @@ func (s *Store) loadFromPath(path string) (Profile, error) {
 			p.Outputs[i].MirrorOf = ""
 		}
 	}
+	p.normalizeIdentityRefs()
 	if err := p.Validate(); err != nil {
 		return Profile{}, err
 	}

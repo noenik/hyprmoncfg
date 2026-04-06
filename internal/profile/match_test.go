@@ -53,6 +53,30 @@ func TestBestMatchPrefersProfileWithDisabledOutput(t *testing.T) {
 	}
 }
 
+func TestBestMatchCountsDuplicateMonitorsSeparately(t *testing.T) {
+	monitors := []hypr.Monitor{
+		{Name: "DP-5", Make: "VIE", Model: "C24PULSE", Serial: "0x01010101"},
+		{Name: "DP-6", Make: "VIE", Model: "C24PULSE", Serial: "0x01010101"},
+	}
+	legacyKey := monitors[0].HardwareKey()
+
+	single := New("single", []OutputConfig{
+		{Key: legacyKey, Name: "DP-5", Enabled: true, Width: 1920, Height: 1080, Scale: 1},
+	})
+	dual := New("dual", []OutputConfig{
+		{Key: legacyKey, Name: "DP-5", Enabled: true, Width: 1920, Height: 1080, Scale: 1},
+		{Key: legacyKey, Name: "DP-6", Enabled: true, Width: 1920, Height: 1080, Scale: 1},
+	})
+
+	picked, _, ok := BestMatch([]Profile{single, dual}, monitors)
+	if !ok {
+		t.Fatal("expected match")
+	}
+	if picked.Name != "dual" {
+		t.Fatalf("expected duplicate-aware match to prefer dual, got %q", picked.Name)
+	}
+}
+
 func TestMonitorSetHashIsStable(t *testing.T) {
 	m1 := hypr.Monitor{Name: "DP-1", Make: "Dell", Model: "U2720Q", Serial: "A1"}
 	m2 := hypr.Monitor{Name: "HDMI-A-1", Make: "LG", Model: "27GP850", Serial: "B2"}

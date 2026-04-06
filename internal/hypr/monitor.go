@@ -79,6 +79,35 @@ func (m Monitor) HardwareKey() string {
 	return cleanIDPart(m.Name)
 }
 
+func MonitorMatchCounts(monitors []Monitor) map[string]int {
+	counts := make(map[string]int, len(monitors))
+	for _, monitor := range monitors {
+		counts[monitor.HardwareKey()]++
+	}
+	return counts
+}
+
+func UniqueOutputKey(matchKey string, connector string, duplicates int) string {
+	matchKey = cleanIDPart(matchKey)
+	connector = cleanIDPart(connector)
+
+	switch {
+	case duplicates <= 1 && matchKey != "":
+		return matchKey
+	case matchKey == "" && connector != "":
+		return connector
+	case connector == "":
+		return matchKey
+	default:
+		return matchKey + "@" + connector
+	}
+}
+
+func MonitorOutputKey(m Monitor, matchCounts map[string]int) string {
+	matchKey := m.HardwareKey()
+	return UniqueOutputKey(matchKey, m.Name, matchCounts[matchKey])
+}
+
 func (m Monitor) ModeString() string {
 	return FormatMode(m.Width, m.Height, m.RefreshRate)
 }
@@ -153,12 +182,13 @@ func MonitorOrder(monitors []Monitor) []string {
 		return sorted[i].Name < sorted[j].Name
 	})
 
+	matchCounts := MonitorMatchCounts(sorted)
 	keys := make([]string, 0, len(sorted))
 	for _, monitor := range sorted {
 		if monitor.MirrorOf != "" {
 			continue
 		}
-		keys = append(keys, monitor.HardwareKey())
+		keys = append(keys, MonitorOutputKey(monitor, matchCounts))
 	}
 	return keys
 }

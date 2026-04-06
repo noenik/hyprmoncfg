@@ -70,6 +70,7 @@ func WorkspaceSettingsFromHypr(monitors []hypr.Monitor, rules []hypr.WorkspaceRu
 }
 
 func ResolveWorkspaceRules(p Profile, monitors []hypr.Monitor) []WorkspaceRule {
+	p.normalizeIdentityRefs()
 	settings := p.Workspaces
 	if !settings.Enabled {
 		return nil
@@ -354,17 +355,28 @@ func workspaceOrderFromRules(rules []WorkspaceRule, outputs []OutputConfig) []st
 
 func matchMonitorRule(selector string, monitors []hypr.Monitor) (string, string) {
 	selector = strings.TrimSpace(selector)
+	matchCounts := hypr.MonitorMatchCounts(monitors)
 	for _, monitor := range monitors {
-		if selector == monitor.Name || selector == monitor.MonitorSelector() {
-			return monitor.HardwareKey(), monitor.Name
+		if selector == monitor.Name {
+			return hypr.MonitorOutputKey(monitor, matchCounts), monitor.Name
 		}
 	}
 
 	if strings.HasPrefix(selector, "desc:") {
 		desc := strings.TrimPrefix(selector, "desc:")
+		matches := make([]hypr.Monitor, 0, len(monitors))
 		for _, monitor := range monitors {
 			if strings.TrimSpace(monitor.Description) == strings.TrimSpace(desc) {
-				return monitor.HardwareKey(), monitor.Name
+				matches = append(matches, monitor)
+			}
+		}
+		if len(matches) == 1 {
+			return hypr.MonitorOutputKey(matches[0], matchCounts), matches[0].Name
+		}
+	} else {
+		for _, monitor := range monitors {
+			if selector == monitor.MonitorSelector() {
+				return hypr.MonitorOutputKey(monitor, matchCounts), monitor.Name
 			}
 		}
 	}

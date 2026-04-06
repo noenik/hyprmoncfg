@@ -31,28 +31,23 @@ func SnapshotState(monitors []hypr.Monitor, rules []hypr.WorkspaceRule, workspac
 }
 
 func CommandsForProfile(p profile.Profile, monitors []hypr.Monitor) ([]string, error) {
+	p.Normalize()
 	if len(monitors) == 0 {
 		return nil, fmt.Errorf("no monitors detected")
 	}
 
-	byKey := make(map[string]hypr.Monitor, len(monitors))
-	byName := make(map[string]hypr.Monitor, len(monitors))
-	for _, m := range monitors {
-		byKey[m.HardwareKey()] = m
-		byName[m.Name] = m
-	}
+	resolver := profile.NewMonitorResolver(monitors)
+	matched, matchedByKey := resolveProfileOutputs(p, resolver)
 
-	commands := make([]string, 0, len(p.Outputs))
-	for _, out := range p.Outputs {
-		mon, ok := byKey[out.Key]
-		if !ok && out.Name != "" {
-			mon, ok = byName[out.Name]
+	commands := make([]string, 0, len(matched))
+	for _, item := range matched {
+		mirrorTarget := ""
+		if item.config.MirrorOf != "" {
+			if target, ok := matchedByKey[item.config.MirrorOf]; ok {
+				mirrorTarget = target.monitor.Name
+			}
 		}
-		if !ok {
-			continue
-		}
-		mirrorTarget := resolveMirrorTarget(out.MirrorOf, byKey, byName)
-		commands = append(commands, commandForOutput(mon.Name, out, mirrorTarget))
+		commands = append(commands, commandForOutput(item.monitor.Name, item.config, mirrorTarget))
 	}
 
 	if len(commands) == 0 {
@@ -62,29 +57,33 @@ func CommandsForProfile(p profile.Profile, monitors []hypr.Monitor) ([]string, e
 }
 
 func WorkspaceCommandsForProfile(p profile.Profile, monitors []hypr.Monitor) []string {
+	p.Normalize()
 	rules := profile.ResolveWorkspaceRules(p, monitors)
 	if len(rules) == 0 {
 		return nil
 	}
 
-	byKey := make(map[string]hypr.Monitor, len(monitors))
-	byName := make(map[string]hypr.Monitor, len(monitors))
-	for _, monitor := range monitors {
-		byKey[monitor.HardwareKey()] = monitor
-		byName[monitor.Name] = monitor
-	}
+	resolver := profile.NewMonitorResolver(monitors)
 
 	commands := make([]string, 0, len(rules)*2)
 	for _, rule := range rules {
-		monitor, ok := byKey[rule.OutputKey]
-		if !ok && rule.OutputName != "" {
-			monitor, ok = byName[rule.OutputName]
+		output, ok := p.OutputByKey(rule.OutputKey)
+		if !ok {
+			output = profile.OutputConfig{
+				Key:  rule.OutputKey,
+				Name: rule.OutputName,
+			}
+		}
+		monitor, ok := resolver.ResolveOutput(output)
+		if !ok {
+			monitor, ok = resolver.Resolve(output.MatchIdentity(), rule.OutputName)
 		}
 		if !ok {
 			continue
 		}
 
-		commands = append(commands, "keyword workspace "+workspaceRuleCommand(rule.Workspace, monitor.MonitorSelector(), rule.Default, rule.Persistent))
+		selector := resolver.SelectorForOutput(output, monitor)
+		commands = append(commands, "keyword workspace "+workspaceRuleCommand(rule.Workspace, selector, rule.Default, rule.Persistent))
 		commands = append(commands, fmt.Sprintf("dispatch moveworkspacetomonitor %s %s", shellEscape(rule.Workspace), monitor.Name))
 	}
 	return commands
@@ -322,64 +321,48 @@ func (e Engine) applyLiveCommands(ctx context.Context, commands []string) error 
 }
 
 func RenderHyprlandConfig(p profile.Profile, monitors []hypr.Monitor, useV2 bool) (string, error) {
-	type matchedOutput struct {
-		config  profile.OutputConfig
-		monitor hypr.Monitor
-	}
-
-	byKey := make(map[string]hypr.Monitor, len(monitors))
-	byName := make(map[string]hypr.Monitor, len(monitors))
-	for _, monitor := range monitors {
-		byKey[monitor.HardwareKey()] = monitor
-		byName[monitor.Name] = monitor
-	}
-
-	matched := make([]matchedOutput, 0, len(p.Outputs))
-	for _, output := range p.Outputs {
-		monitor, ok := byKey[output.Key]
-		if !ok && output.Name != "" {
-			monitor, ok = byName[output.Name]
-		}
-		if !ok {
-			continue
-		}
-		matched = append(matched, matchedOutput{config: output, monitor: monitor})
-	}
+	p.Normalize()
+	resolver := profile.NewMonitorResolver(monitors)
+	matched, matchedByKey := resolveProfileOutputs(p, resolver)
 	if len(matched) == 0 {
 		return "", fmt.Errorf("profile %q does not match any connected monitor", p.Name)
-	}
-
-	keyToMonitor := make(map[string]hypr.Monitor, len(monitors))
-	for _, monitor := range monitors {
-		keyToMonitor[monitor.HardwareKey()] = monitor
 	}
 
 	monitorBlocks := make([]string, 0, len(matched))
 	for _, item := range matched {
 		mirrorTarget := ""
 		if item.config.MirrorOf != "" {
-			if target, ok := keyToMonitor[item.config.MirrorOf]; ok {
-				mirrorTarget = monitorIdentifier(target)
+			if target, ok := matchedByKey[item.config.MirrorOf]; ok {
+				mirrorTarget = resolver.SelectorForOutput(target.config, target.monitor)
 			}
 		}
+		identifier := resolver.SelectorForOutput(item.config, item.monitor)
 		if useV2 {
-			monitorBlocks = append(monitorBlocks, renderMonitorV2Block(item.monitor, item.config, mirrorTarget))
+			monitorBlocks = append(monitorBlocks, renderMonitorV2Block(identifier, item.config, mirrorTarget))
 			continue
 		}
-		monitorBlocks = append(monitorBlocks, "monitor = "+commandForOutput(monitorIdentifier(item.monitor), item.config, mirrorTarget))
+		monitorBlocks = append(monitorBlocks, "monitor = "+commandForOutput(identifier, item.config, mirrorTarget))
 	}
 
 	workspaceLines := make([]string, 0)
 	rules := profile.ResolveWorkspaceRules(p, monitors)
 	for _, rule := range rules {
-		monitor, ok := byKey[rule.OutputKey]
-		if !ok && rule.OutputName != "" {
-			monitor, ok = byName[rule.OutputName]
+		output, ok := p.OutputByKey(rule.OutputKey)
+		if !ok {
+			output = profile.OutputConfig{
+				Key:  rule.OutputKey,
+				Name: rule.OutputName,
+			}
+		}
+		monitor, ok := resolver.ResolveOutput(output)
+		if !ok {
+			monitor, ok = resolver.Resolve(output.MatchIdentity(), rule.OutputName)
 		}
 		if !ok {
 			continue
 		}
-		workspaceLines = append(workspaceLines, "workspace = "+workspaceRuleCommand(rule.Workspace, monitor.MonitorSelector(), rule.Default, rule.Persistent))
+		selector := resolver.SelectorForOutput(output, monitor)
+		workspaceLines = append(workspaceLines, "workspace = "+workspaceRuleCommand(rule.Workspace, selector, rule.Default, rule.Persistent))
 	}
 
 	sections := []string{"# Generated by hyprmoncfg", strings.Join(monitorBlocks, "\n\n")}
@@ -427,33 +410,17 @@ func ValidateLayout(outputs []profile.OutputConfig) error {
 }
 
 func ValidateAppliedProfile(p profile.Profile, before []hypr.Monitor, after []hypr.Monitor) error {
-	afterByKey := make(map[string]hypr.Monitor, len(after))
-	afterByName := make(map[string]hypr.Monitor, len(after))
-	for _, monitor := range after {
-		afterByKey[monitor.HardwareKey()] = monitor
-		afterByName[monitor.Name] = monitor
-	}
-
-	beforeByKey := make(map[string]hypr.Monitor, len(before))
-	beforeByName := make(map[string]hypr.Monitor, len(before))
-	for _, monitor := range before {
-		beforeByKey[monitor.HardwareKey()] = monitor
-		beforeByName[monitor.Name] = monitor
-	}
+	p.Normalize()
+	beforeResolver := profile.NewMonitorResolver(before)
+	afterResolver := profile.NewMonitorResolver(after)
 
 	for _, output := range p.Outputs {
-		monitor, ok := beforeByKey[output.Key]
-		if !ok && output.Name != "" {
-			monitor, ok = beforeByName[output.Name]
-		}
+		monitor, ok := beforeResolver.ResolveOutput(output)
 		if !ok {
 			continue
 		}
 
-		applied, ok := afterByKey[monitor.HardwareKey()]
-		if !ok {
-			applied, ok = afterByName[monitor.Name]
-		}
+		applied, ok := afterResolver.Resolve(monitor.HardwareKey(), monitor.Name)
 		if !ok {
 			continue
 		}
@@ -497,10 +464,10 @@ func ValidateAppliedProfile(p profile.Profile, before []hypr.Monitor, after []hy
 	return nil
 }
 
-func renderMonitorV2Block(monitor hypr.Monitor, output profile.OutputConfig, mirrorTarget string) string {
+func renderMonitorV2Block(identifier string, output profile.OutputConfig, mirrorTarget string) string {
 	lines := []string{
 		"monitorv2 {",
-		"  output = " + monitorIdentifier(monitor),
+		"  output = " + identifier,
 	}
 	if !output.Enabled {
 		lines = append(lines, "  disabled = 1", "}")
@@ -524,26 +491,6 @@ func renderMonitorV2Block(monitor hypr.Monitor, output profile.OutputConfig, mir
 	}
 	lines = append(lines, "}")
 	return strings.Join(lines, "\n")
-}
-
-func resolveMirrorTarget(mirrorKey string, byKey map[string]hypr.Monitor, byName map[string]hypr.Monitor) string {
-	if mirrorKey == "" {
-		return ""
-	}
-	if target, ok := byKey[mirrorKey]; ok {
-		return target.Name
-	}
-	if target, ok := byName[mirrorKey]; ok {
-		return target.Name
-	}
-	return ""
-}
-
-func monitorIdentifier(monitor hypr.Monitor) string {
-	if desc := strings.TrimSpace(monitor.Description); desc != "" {
-		return "desc:" + desc
-	}
-	return monitor.Name
 }
 
 func logicalOutputSize(output profile.OutputConfig) (int, int) {
@@ -571,4 +518,24 @@ func outputName(output profile.OutputConfig) string {
 		return output.Key
 	}
 	return "monitor"
+}
+
+type matchedOutput struct {
+	config  profile.OutputConfig
+	monitor hypr.Monitor
+}
+
+func resolveProfileOutputs(p profile.Profile, resolver profile.MonitorResolver) ([]matchedOutput, map[string]matchedOutput) {
+	matched := make([]matchedOutput, 0, len(p.Outputs))
+	matchedByKey := make(map[string]matchedOutput, len(p.Outputs))
+	for _, output := range p.Outputs {
+		monitor, ok := resolver.ResolveOutput(output)
+		if !ok {
+			continue
+		}
+		item := matchedOutput{config: output, monitor: monitor}
+		matched = append(matched, item)
+		matchedByKey[output.Key] = item
+	}
+	return matched, matchedByKey
 }
