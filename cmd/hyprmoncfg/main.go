@@ -186,6 +186,9 @@ func newApplyCmd(configDir *string, monitorsConf *string, hyprConfig *string) *c
 				Client:             client,
 				MonitorsConfPath:   *monitorsConf,
 				HyprlandConfigPath: *hyprConfig,
+				Logf: func(format string, args ...any) {
+					fmt.Printf(format, args...)
+				},
 			}
 			snapshot, err := engine.Apply(ctx, p, monitors)
 			if err != nil {
