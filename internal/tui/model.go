@@ -81,6 +81,10 @@ type openURLMsg struct {
 	err   error
 }
 
+type clearToastMsg struct {
+	token int
+}
+
 type clearSnapMsg struct {
 	token int
 }
@@ -91,6 +95,12 @@ type pendingApply struct {
 	snapshot apply.RevertState
 	target   string
 	deadline time.Time
+}
+
+type toastState struct {
+	message string
+	err     bool
+	token   int
 }
 
 type editableOutput struct {
@@ -219,8 +229,10 @@ type Model struct {
 	input         *numericInputState
 	execInput     *profileExecInputState
 	drag          *canvasDragState
+	toast         *toastState
 	snap          *snapHintState
 	snapSeq       int
+	toastSeq      int
 
 	resetRequested   bool
 	status           string
@@ -344,6 +356,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case clearSnapMsg:
 		if m.snap != nil && msg.token == m.snap.Token {
 			m.snap = nil
+		}
+		return m, nil
+
+	case clearToastMsg:
+		if m.toast != nil && msg.token == m.toast.token {
+			m.toast = nil
 		}
 		return m, nil
 
@@ -641,18 +659,22 @@ func (m Model) updateConfirmKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c", "q":
 		return m, tea.Quit
 	case "y", "enter":
+		var toastCmd tea.Cmd
 		if target := strings.TrimSpace(m.pending.target); target != "" && target != "draft" {
 			m.draftProfileName = target
 
 			if profile, exists := m.profileByName(target); exists {
-				m.postApply(profile)
+				if err := m.postApply(profile); err != nil {
+					toastCmd = m.notifyUser(fmt.Sprintf("Post-apply failed for %q: %v", profile.Name, err), true)
+				}
 			}
 		}
+
 		m.mode = modeMain
 		m.pending = nil
 		m.markClean()
 		m.setStatusOK("Configuration kept")
-		return m, m.refreshCmd()
+		return m, tea.Batch(m.refreshCmd(), toastCmd)
 	case "n", "esc":
 		snapshot := m.pending.snapshot
 		return m, m.revertCmd(snapshot, "user request")
@@ -683,9 +705,14 @@ func (m Model) View() string {
 func (m Model) renderMain() string {
 	title := m.renderTitleBar()
 	tabs := m.renderTabs()
+	toast := m.renderToast()
+	toastHeight := 0
+	if toast != "" {
+		toastHeight = lipgloss.Height(toast) + 1
+	}
 
 	footerText := m.renderFooterBar()
-	bodyHeight := m.mainBodyHeight(title, tabs, "", footerText)
+	bodyHeight := max(3, m.mainBodyHeight(title, tabs, "", footerText)-toastHeight)
 
 	var body string
 	switch m.tab {
@@ -703,6 +730,15 @@ func (m Model) renderMain() string {
 		title,
 		tabs,
 		body,
+	}, "\n")
+	if toast != "" {
+		content = strings.Join([]string{
+			content,
+			lipgloss.PlaceHorizontal(m.footerContentWidth(), lipgloss.Center, toast),
+		}, "\n")
+	}
+	content = strings.Join([]string{
+		content,
 		styledFooter,
 	}, "\n")
 	app := m.styles.app
@@ -1166,6 +1202,17 @@ func (m Model) renderConfirm() string {
 		m.styles.help.MaxWidth(max(20, m.modalMaxWidth()-6)).Render("Enter or y keeps the change. Esc or n reverts it."),
 	}
 	return m.renderModalFrame("Confirm Apply", body)
+}
+
+func (m Model) renderToast() string {
+	if m.toast == nil || strings.TrimSpace(m.toast.message) == "" {
+		return ""
+	}
+	style := m.styles.toast
+	if m.toast.err {
+		style = m.styles.toastError
+	}
+	return style.MaxWidth(max(24, m.terminalWidth()-8)).Render(m.toast.message)
 }
 
 func (m Model) renderStatus() string {
@@ -2038,6 +2085,21 @@ func (m *Model) setStatusOK(msg string) {
 	m.statusErr = false
 }
 
+func (m *Model) notifyUser(msg string, isErr bool) tea.Cmd {
+	msg = strings.TrimSpace(msg)
+	if msg == "" {
+		return nil
+	}
+	m.toastSeq++
+	token := m.toastSeq
+	m.toast = &toastState{
+		message: msg,
+		err:     isErr,
+		token:   token,
+	}
+	return clearToastCmd(token)
+}
+
 func isDaemonRunning() bool {
 	return exec.Command("pgrep", "-x", "hyprmoncfgd").Run() == nil
 }
@@ -2670,6 +2732,12 @@ func (m *Model) showSnapHint(hint *snapHintState) tea.Cmd {
 func clearSnapCmd(token int) tea.Cmd {
 	return tea.Tick(700*time.Millisecond, func(time.Time) tea.Msg {
 		return clearSnapMsg{token: token}
+	})
+}
+
+func clearToastCmd(token int) tea.Cmd {
+	return tea.Tick(4*time.Second, func(time.Time) tea.Msg {
+		return clearToastMsg{token: token}
 	})
 }
 

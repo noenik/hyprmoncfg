@@ -202,12 +202,23 @@ func (m Model) renderModalScreen(overlay string) string {
 
 	width := m.terminalWidth()
 	height := m.terminalHeight()
+	toast := m.renderToast()
+	toastHeight := 0
+	if toast != "" {
+		toastHeight = lipgloss.Height(toast) + 1
+	}
 
 	title := m.renderTitleBar()
 	tabs := m.renderTabs()
-	bodyHeight := max(12, height-lipgloss.Height(title)-lipgloss.Height(tabs)-2)
+	bodyHeight := max(12, height-lipgloss.Height(title)-lipgloss.Height(tabs)-2-toastHeight)
 	centered := lipgloss.Place(width-2, bodyHeight, lipgloss.Center, lipgloss.Center, overlay)
 	body := m.styles.modalBackdrop.Width(width).Height(bodyHeight).Render(centered)
+	if toast != "" {
+		body = strings.Join([]string{
+			body,
+			lipgloss.PlaceHorizontal(max(1, width-2), lipgloss.Center, toast),
+		}, "\n")
+	}
 	return strings.Join([]string{title, tabs, body}, "\n")
 }
 

@@ -88,6 +88,45 @@ func TestRenderMainShowsFooterProjectLinks(t *testing.T) {
 	}
 }
 
+func TestNotifyUserRendersToastInMainView(t *testing.T) {
+	m := Model{
+		styles:          newStyles(),
+		mode:            modeMain,
+		tab:             tabProfiles,
+		width:           120,
+		height:          30,
+		selectedProfile: 0,
+		profiles:        []profile.Profile{{Name: "Desk Dock"}},
+	}
+
+	cmd := m.notifyUser("Post-apply failed", true)
+	if cmd == nil {
+		t.Fatal("expected notifyUser to return a clear command")
+	}
+
+	view := ansi.Strip(m.View())
+	if !strings.Contains(view, "Post-apply failed") {
+		t.Fatalf("expected toast message in rendered view, got:\n%s", view)
+	}
+}
+
+func TestClearToastMsgRemovesToast(t *testing.T) {
+	m := Model{
+		styles: newStyles(),
+		toast: &toastState{
+			message: "Post-apply failed",
+			err:     true,
+			token:   3,
+		},
+	}
+
+	updated, _ := m.Update(clearToastMsg{token: 3})
+	got := updated.(Model)
+	if got.toast != nil {
+		t.Fatalf("expected toast to be cleared, got %+v", got.toast)
+	}
+}
+
 func TestRenderFooterInfoIncludesVersion(t *testing.T) {
 	prevVersion := buildinfo.Version
 	buildinfo.Version = "1.2.3"
