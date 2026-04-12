@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -133,6 +134,7 @@ func newSaveCmd(configDir *string) *cobra.Command {
 		Short: "Save current monitor state as profile",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[0]
 			client, store, err := bootstrap(*configDir)
 			if err != nil {
 				return err
@@ -147,7 +149,12 @@ func newSaveCmd(configDir *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			p := profile.FromState(args[0], monitors, rules)
+			p := profile.FromState(name, monitors, rules)
+			existing, err := store.Load(name)
+			if err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+			p.Exec = existing.Exec
 			if err := store.Save(p); err != nil {
 				return err
 			}
