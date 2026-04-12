@@ -190,7 +190,7 @@ func newApplyCmd(configDir *string, monitorsConf *string, hyprConfig *string) *c
 					fmt.Printf(format, args...)
 				},
 			}
-			snapshot, err := engine.Apply(ctx, p, monitors)
+			snapshot, err := engine.Apply(ctx, p, monitors, apply.ApplyModeInteractive)
 			if err != nil {
 				return err
 			}
@@ -206,6 +206,12 @@ func newApplyCmd(configDir *string, monitorsConf *string, hyprConfig *string) *c
 			}
 			if keep {
 				fmt.Println("Configuration kept")
+
+				err = engine.PostApply(ctx, p)
+				if err != nil {
+					fmt.Printf("Post-apply failed for %s: %v\n", p.Name, err)
+				}
+
 				return nil
 			}
 
