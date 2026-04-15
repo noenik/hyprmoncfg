@@ -189,6 +189,15 @@ func newApplyCmd(configDir *string, monitorsConf *string, hyprConfig *string) *c
 				return err
 			}
 
+			var (
+				applyMode     = apply.ApplyModeInteractive
+				isInterActive = confirmTimeout > 0
+			)
+
+			if !isInterActive {
+				applyMode = apply.ApplyModeNonInteractive
+			}
+
 			engine := apply.Engine{
 				Client:             client,
 				MonitorsConfPath:   *monitorsConf,
@@ -197,13 +206,13 @@ func newApplyCmd(configDir *string, monitorsConf *string, hyprConfig *string) *c
 					fmt.Printf(format, args...)
 				},
 			}
-			snapshot, err := engine.Apply(ctx, p, monitors, apply.ApplyModeInteractive)
+			snapshot, err := engine.Apply(ctx, p, monitors, applyMode)
 			if err != nil {
 				return err
 			}
 			fmt.Printf("Applied profile %q\n", p.Name)
 
-			if confirmTimeout <= 0 {
+			if !isInterActive {
 				return nil
 			}
 
@@ -214,7 +223,10 @@ func newApplyCmd(configDir *string, monitorsConf *string, hyprConfig *string) *c
 			if keep {
 				fmt.Println("Configuration kept")
 
-				err = engine.PostApply(ctx, p)
+				postApplyCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+				defer cancel()
+
+				err = engine.PostApply(postApplyCtx, p)
 				if err != nil {
 					fmt.Printf("Post-apply failed for %s: %v\n", p.Name, err)
 				}
