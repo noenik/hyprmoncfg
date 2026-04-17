@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/crmne/hyprmoncfg/internal/apply"
@@ -52,7 +53,8 @@ func New(client *hypr.Client, store *profile.Store, cfg Config) *Service {
 			MonitorsConfPath:   cfg.MonitorsConf,
 			HyprlandConfigPath: cfg.HyprConfig,
 		},
-		cfg: cfg,
+		cfg:      cfg,
+		lidState: lid.Unknown,
 	}
 }
 
@@ -186,8 +188,7 @@ func (s *Service) applyBest(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		lidClosed := s.lidState.ClosedPtr()
-		best, score, ok := profile.BestMatchWithLidState(profiles, monitors, lidClosed)
+		best, score, ok := profile.BestMatch(profiles, monitors)
 		if !ok {
 			s.cfg.Logf("no matching profile for monitor set %s", hash)
 			return nil
@@ -200,12 +201,34 @@ func (s *Service) applyBest(ctx context.Context) error {
 		target = best
 	}
 
-	applyKey := target.Name + "|" + hash
+	effective := target
+	if s.lidState == lid.Closed {
+		adjusted, adjustment := profile.ApplyClosedLidPolicy(target, monitors)
+		effective = adjusted
+		if adjustment.Applied {
+			disabled := strings.Join(adjustment.DisabledOutputNames, ",")
+			if disabled == "" {
+				disabled = "already disabled"
+			}
+			workspaceTarget := adjustment.WorkspaceTargetName
+			if workspaceTarget == "" {
+				workspaceTarget = "none"
+			}
+			s.cfg.Logf(
+				"lid closed: forced internal outputs off (%s), workspace target=%s retargeted=%d",
+				disabled,
+				workspaceTarget,
+				adjustment.RetargetedWorkspaces,
+			)
+		}
+	}
+
+	applyKey := target.Name + "|" + hash + "|lid=" + string(s.lidState)
 	if applyKey == s.applied {
 		return nil
 	}
 
-	if _, err := s.engine.Apply(ctx, target, monitors); err != nil {
+	if _, err := s.engine.Apply(ctx, effective, monitors); err != nil {
 		return err
 	}
 
@@ -217,7 +240,7 @@ func (s *Service) applyBest(ctx context.Context) error {
 		appliedHash = profile.MonitorStateHash(appliedMonitors)
 	}
 
-	s.applied = target.Name + "|" + appliedHash
+	s.applied = target.Name + "|" + appliedHash + "|lid=" + string(s.lidState)
 	s.lastSeenHash = appliedHash
 	s.cfg.Logf("applied profile: %s", target.Name)
 	return nil

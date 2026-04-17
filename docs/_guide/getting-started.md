@@ -115,6 +115,8 @@ Before you turn on automatic switching, make sure your profile library reflects 
 - Delete throwaway profiles you created while experimenting
 - Re-save the profile you actually use instead of keeping old variants around
 
+On laptops, you do not need a separate closed-lid profile. Save the profile for the monitors you attach at that desk. When the lid is closed and an external monitor is connected, hyprmoncfg forces the internal laptop panel off for the apply and moves workspaces away from it.
+
 ## Apply from the command line
 
 ```bash

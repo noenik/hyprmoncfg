@@ -14,6 +14,7 @@ import (
 
 	"github.com/crmne/hyprmoncfg/internal/apply"
 	"github.com/crmne/hyprmoncfg/internal/hypr"
+	"github.com/crmne/hyprmoncfg/internal/lid"
 	"github.com/crmne/hyprmoncfg/internal/profile"
 )
 
@@ -48,6 +49,7 @@ type refreshMsg struct {
 	profiles       []profile.Profile
 	workspaceRules []hypr.WorkspaceRule
 	workspaces     []hypr.WorkspaceState
+	lidState       lid.State
 	err            error
 }
 
@@ -113,6 +115,7 @@ type editableOutput struct {
 	Transform         int
 	Focused           bool
 	DPMSStatus        bool
+	IsInternal        bool
 	MirrorOf          string
 	ActiveWorkspace   string
 	Bitdepth          int
@@ -202,6 +205,7 @@ type Model struct {
 	profiles       []profile.Profile
 	workspaceRules []hypr.WorkspaceRule
 	workspaces     []hypr.WorkspaceState
+	lidState       lid.State
 
 	editOutputs     []editableOutput
 	workspaceEdit   workspaceEditor
@@ -290,6 +294,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.profiles = msg.profiles
 		m.workspaceRules = msg.workspaceRules
 		m.workspaces = msg.workspaces
+		m.lidState = msg.lidState
 
 		if len(m.editOutputs) == 0 || !m.dirty {
 			m.loadLiveState()
@@ -711,6 +716,10 @@ func (m Model) renderCanvasPane(width int, height int) string {
 	if showLegend {
 		nonCanvasLines += 4
 	}
+	showLidState := m.lidStatusLine() != "" && innerHeight >= 8
+	if showLidState {
+		nonCanvasLines++
+	}
 
 	disabled := make([]string, 0)
 	for _, output := range m.editOutputs {
@@ -728,6 +737,9 @@ func (m Model) renderCanvasPane(width int, height int) string {
 
 	canvasHeight := max(1, innerHeight-nonCanvasLines)
 	lines := []string{m.styles.header.Render("Monitor Layout")}
+	if showLidState {
+		lines = append(lines, m.styles.subtle.Render(m.lidStatusLine()))
+	}
 	lines = append(lines, m.renderCanvas(max(1, innerWidth-2), canvasHeight))
 
 	legend := lipgloss.JoinHorizontal(
@@ -748,6 +760,17 @@ func (m Model) renderCanvasPane(width int, height int) string {
 		lines = append(lines, m.styles.subtle.Render("Mirrors: "+strings.Join(mirrors, ", ")))
 	}
 	return panel.Width(innerWidth).Render(fitBlock(strings.Join(lines, "\n"), innerWidth, innerHeight))
+}
+
+func (m Model) lidStatusLine() string {
+	switch m.lidState {
+	case lid.Closed:
+		return "Lid: closed · internal displays are forced off when profiles apply"
+	case lid.Open:
+		return "Lid: open"
+	default:
+		return ""
+	}
 }
 
 func (m Model) renderCanvas(width, height int) string {
@@ -1168,6 +1191,7 @@ func (m Model) compactLayoutHeights(total int) (int, int) {
 func (m Model) inspectorDetailLines(output editableOutput) []string {
 	lines := []string{
 		fmt.Sprintf("%s %s", m.styles.label.Render("Connector "), m.styles.value.Render(output.Name)),
+		fmt.Sprintf("%s %s", m.styles.label.Render("Type      "), m.styles.value.Render(outputTypeLabel(output))),
 		fmt.Sprintf("%s %s", m.styles.label.Render("Model     "), m.styles.value.Render(output.displayModelLabel())),
 		fmt.Sprintf("%s %s", m.styles.label.Render("Serial    "), m.styles.value.Render(blankFallback(strings.TrimSpace(output.Serial), "(none)"))),
 		fmt.Sprintf("%s %s", m.styles.label.Render("Layout px "), m.styles.value.Render(output.layoutSizeLabel())),
@@ -1178,6 +1202,13 @@ func (m Model) inspectorDetailLines(output editableOutput) []string {
 		lines = append(lines, fmt.Sprintf("%s %s", m.styles.label.Render("Panel mm  "), m.styles.value.Render(fmt.Sprintf("%d x %d mm", output.PhysicalWidth, output.PhysicalHeight))))
 	}
 	return lines
+}
+
+func outputTypeLabel(output editableOutput) string {
+	if output.IsInternal {
+		return "Internal display"
+	}
+	return "External display"
 }
 
 func fitBlock(text string, width int, height int) string {
@@ -1736,12 +1767,17 @@ func (m Model) refreshCmd() tea.Cmd {
 		if err != nil {
 			return refreshMsg{err: err}
 		}
+		lidState, err := lid.ReadState(ctx)
+		if err != nil {
+			lidState = lid.Unknown
+		}
 
 		return refreshMsg{
 			monitors:       monitors,
 			profiles:       profiles,
 			workspaceRules: workspaceRules,
 			workspaces:     workspaces,
+			lidState:       lidState,
 		}
 	}
 }
@@ -1777,7 +1813,11 @@ func (m Model) applyCmd(p profile.Profile) tea.Cmd {
 		if err != nil {
 			return applyMsg{target: p.Name, err: err}
 		}
-		snapshot, err := engine.Apply(ctx, p, monitors)
+		applyProfile := p
+		if state, err := lid.ReadState(ctx); err == nil && state == lid.Closed {
+			applyProfile, _ = profile.ApplyClosedLidPolicy(p, monitors)
+		}
+		snapshot, err := engine.Apply(ctx, applyProfile, monitors)
 		if err != nil {
 			return applyMsg{target: p.Name, err: err}
 		}
@@ -1985,6 +2025,7 @@ func editableOutputFromMonitor(m hypr.Monitor, matchCounts map[string]int) edita
 		Transform:       m.Transform,
 		Focused:         m.Focused,
 		DPMSStatus:      m.DPMSStatus,
+		IsInternal:      m.IsInternal(),
 		MirrorOf:        m.MirrorOf,
 		ActiveWorkspace: m.ActiveWorkspace.Name,
 		Bitdepth:        m.Bitdepth(),
@@ -2023,6 +2064,7 @@ func editableOutputFromProfile(saved profile.OutputConfig, live hypr.Monitor, ha
 		Scale:             clampFloat(saved.Scale, 0.25, 4.0),
 		VRR:               saved.VRR,
 		Transform:         saved.Transform,
+		IsInternal:        isInternalOutputName(saved.Name),
 		MirrorOf:          saved.MirrorOf,
 		Bitdepth:          saved.Bitdepth,
 		CM:                saved.CM,
@@ -2046,6 +2088,7 @@ func editableOutputFromProfile(saved profile.OutputConfig, live hypr.Monitor, ha
 		output.PhysicalHeight = live.PhysicalHeight
 		output.Focused = live.Focused
 		output.DPMSStatus = live.DPMSStatus
+		output.IsInternal = live.IsInternal()
 		output.ActiveWorkspace = live.ActiveWorkspace.Name
 		output.Modes = normalizeModes(live.AvailableModes, mode)
 	} else {
@@ -2260,6 +2303,11 @@ func (o editableOutput) displayModelLabel() string {
 	return "(unknown)"
 }
 
+func isInternalOutputName(name string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	return strings.HasPrefix(name, "edp") || strings.HasPrefix(name, "lvds") || strings.HasPrefix(name, "dsi")
+}
+
 type cardLine struct {
 	text string
 	fg   string
@@ -2267,6 +2315,9 @@ type cardLine struct {
 }
 
 func (o editableOutput) cardModelLabel() string {
+	if o.IsInternal {
+		return "Internal · " + o.displayModelLabel()
+	}
 	return o.displayModelLabel()
 }
 

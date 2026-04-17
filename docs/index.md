@@ -28,7 +28,7 @@ features:
     details: Drag monitors on a canvas, tweak mode, scale, VRR, mirror, and exact position in the inspector. See the result before you apply it.
   - icon: 🔌
     title: Hotplug and Lid-Aware Daemon
-    details: Plug in a monitor, close the lid, and walk away. The daemon scores your saved profiles against connected hardware and lid state, then applies the best match automatically.
+    details: Plug in a monitor, close the lid, and walk away. The daemon picks the best hardware profile and forces the internal laptop panel off when the lid is closed.
   - icon: 🔁
     title: Safe Apply with Revert
     details: Every apply writes monitors.conf atomically, reloads Hyprland, and verifies the result. A 10-second confirmation window means you never get locked out.

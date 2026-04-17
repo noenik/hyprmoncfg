@@ -36,11 +36,12 @@ That's it. The daemon is running. The rest of this page explains how it decides 
 When the daemon detects a monitor or lid-state change, it runs through these steps:
 
 1. Read the current monitor set from Hyprland
-2. Score every saved profile against the connected hardware and known lid state (see [Profile matching](#profile-matching) below for how scoring works)
+2. Score every saved profile against the connected hardware (see [Profile matching](#profile-matching) below for how scoring works)
 3. Pick the highest-scoring profile
-4. Write `monitors.conf` atomically (temp file + rename, so a crash mid-write can't corrupt your config)
-5. Tell Hyprland to reload
-6. Re-read monitor state and verify the result matches what was intended
+4. If the lid is closed and an external monitor is connected, force internal laptop-panel outputs off for this apply
+5. Write `monitors.conf` atomically (temp file + rename, so a crash mid-write can't corrupt your config)
+6. Tell Hyprland to reload
+7. Re-read monitor state and verify the result matches what was intended
 
 If the winning profile is the same one that's already applied, the daemon skips re-applying it. You won't see unnecessary reloads.
 
@@ -61,14 +62,13 @@ Highest score wins. Ties break alphabetically by profile name.
 
 On laptops, the daemon also reads lid state. UPower is optional, but recommended: with UPower available, lid changes arrive as D-Bus events and the daemon can react immediately. Without UPower, the daemon falls back to polling `/proc/acpi/button/lid/*/state` at `--lid-poll-interval`, which defaults to `1s` and is not available on every system. If neither source exists, lid-aware switching is disabled and monitor hotplug still works.
 
-If an internal panel and an external monitor are both present, closed-lid matching prefers profiles where the internal panel is disabled or omitted. Open-lid matching prefers profiles where the internal panel is enabled. Workspace rules in the winning profile are applied too, so existing workspaces move to the profile's configured monitor targets.
+Lid state is not a separate profile type. Save the profile for the monitor setup you actually have attached. When the lid is closed and an external monitor is connected, hyprmoncfg treats internal laptop-panel outputs like `eDP-1`, `LVDS-1`, or `DSI-1` as forced off for that apply. Saved profiles are not rewritten. If workspace rules target the forced-off internal panel, those workspaces are moved to the first enabled external output in the selected profile.
 
 {% include alert.html type="warning" title="Every Profile Is A Candidate" content="The daemon does not know which profiles are \"real\" and which were temporary experiments. It scores every JSON file in your profiles directory. An old throwaway profile with a high enough score will win over the one you actually want." %}
 
 If you want reliable auto-switching:
 
 - Save profiles for every real monitor setup you want the daemon to handle
-- For clamshell mode, save one lid-open profile and one lid-closed profile with the internal panel disabled
 - Keep one profile per setup -- don't accumulate near-duplicates
 - Delete experimental profiles when you're done experimenting
 - If two profiles tie, the one whose name comes first alphabetically wins

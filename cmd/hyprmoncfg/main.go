@@ -16,6 +16,7 @@ import (
 	"github.com/crmne/hyprmoncfg/internal/buildinfo"
 	"github.com/crmne/hyprmoncfg/internal/config"
 	"github.com/crmne/hyprmoncfg/internal/hypr"
+	"github.com/crmne/hyprmoncfg/internal/lid"
 	"github.com/crmne/hyprmoncfg/internal/profile"
 	"github.com/crmne/hyprmoncfg/internal/tui"
 )
@@ -181,13 +182,17 @@ func newApplyCmd(configDir *string, monitorsConf *string, hyprConfig *string) *c
 			if err != nil {
 				return err
 			}
+			applyProfile := p
+			if state, err := lid.ReadState(ctx); err == nil && state == lid.Closed {
+				applyProfile, _ = profile.ApplyClosedLidPolicy(p, monitors)
+			}
 
 			engine := apply.Engine{
 				Client:             client,
 				MonitorsConfPath:   *monitorsConf,
 				HyprlandConfigPath: *hyprConfig,
 			}
-			snapshot, err := engine.Apply(ctx, p, monitors)
+			snapshot, err := engine.Apply(ctx, applyProfile, monitors)
 			if err != nil {
 				return err
 			}

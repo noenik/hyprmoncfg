@@ -77,3 +77,9 @@ You can also configure:
 - **Monitor order** -- which monitor gets the first batch of workspaces. Drag to reorder
 
 The workspace plan is stored inside each profile. When the daemon applies a profile, it applies workspace rules too -- layout and workspace assignment in one shot.
+
+## Laptop lids
+
+Internal laptop panels are marked as internal displays in the layout view. The TUI also shows the current lid state when it is available.
+
+Profiles are still profiles for the attached monitor setup, not separate open-lid and closed-lid variants. When the lid is closed and an external monitor is connected, applying a profile forces internal laptop-panel outputs off for that apply and moves workspace rules away from the forced-off panel.

@@ -33,19 +33,6 @@ func (s State) Known() bool {
 	return s == Open || s == Closed
 }
 
-func (s State) ClosedPtr() *bool {
-	switch s {
-	case Closed:
-		closed := true
-		return &closed
-	case Open:
-		closed := false
-		return &closed
-	default:
-		return nil
-	}
-}
-
 func ReadState(ctx context.Context) (State, error) {
 	if err := ctx.Err(); err != nil {
 		return Unknown, err
