@@ -13,6 +13,8 @@ When you launch `hyprmoncfg`, you land on the layout tab. This is where you arra
 
 Drag monitors on the canvas to reposition them. The inspector updates in real time. When you need pixel-perfect placement, use the `Position X` and `Position Y` fields in the inspector instead of dragging.
 
+While the TUI is open, it also refreshes live monitor state in the background. Plugging or unplugging a monitor, docking, undocking, or changing lid state reloads the editor so the canvas matches the current hardware.
+
 ![Layout editor]({{ '/assets/images/screenshots/layout-dark.png' | relative_url }})
 {: .screenshot }
 
@@ -77,3 +79,9 @@ You can also configure:
 - **Monitor order** -- which monitor gets the first batch of workspaces. Drag to reorder
 
 The workspace plan is stored inside each profile. When the daemon applies a profile, it applies workspace rules too -- layout and workspace assignment in one shot.
+
+## Laptop lids
+
+Internal laptop panels are marked as internal displays in the layout view. The TUI also shows the current lid state when it is available.
+
+Profiles are still profiles for the attached monitor setup, not separate open-lid and closed-lid variants. When the lid is closed and an external monitor is connected, applying a profile forces internal laptop-panel outputs off for that apply and moves workspace rules away from the forced-off panel.

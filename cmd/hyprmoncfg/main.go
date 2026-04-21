@@ -17,6 +17,7 @@ import (
 	"github.com/crmne/hyprmoncfg/internal/buildinfo"
 	"github.com/crmne/hyprmoncfg/internal/config"
 	"github.com/crmne/hyprmoncfg/internal/hypr"
+	"github.com/crmne/hyprmoncfg/internal/lid"
 	"github.com/crmne/hyprmoncfg/internal/profile"
 	"github.com/crmne/hyprmoncfg/internal/tui"
 )
@@ -188,15 +189,12 @@ func newApplyCmd(configDir *string, monitorsConf *string, hyprConfig *string) *c
 			if err != nil {
 				return err
 			}
-
-			var (
-				applyMode     = apply.ApplyModeInteractive
-				isInterActive = confirmTimeout > 0
-			)
-
-			if !isInterActive {
-				applyMode = apply.ApplyModeNonInteractive
+			applyProfile := p
+			if state, err := lid.ReadState(ctx); err == nil && state == lid.Closed {
+				applyProfile, _ = profile.ApplyClosedLidPolicy(p, monitors)
 			}
+
+			isInteractive := confirmTimeout > 0
 
 			engine := apply.Engine{
 				Client:             client,
@@ -206,13 +204,18 @@ func newApplyCmd(configDir *string, monitorsConf *string, hyprConfig *string) *c
 					fmt.Printf(format, args...)
 				},
 			}
-			snapshot, err := engine.Apply(ctx, p, monitors, applyMode)
+			snapshot, err := engine.Apply(ctx, applyProfile, monitors, apply.ApplyModeInteractive)
 			if err != nil {
 				return err
 			}
 			fmt.Printf("Applied profile %q\n", p.Name)
 
-			if !isInterActive {
+			if !isInteractive {
+				postApplyCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+				defer cancel()
+				if err := engine.PostApply(postApplyCtx, applyProfile); err != nil {
+					fmt.Printf("Post-apply failed for %s: %v\n", p.Name, err)
+				}
 				return nil
 			}
 
@@ -226,7 +229,7 @@ func newApplyCmd(configDir *string, monitorsConf *string, hyprConfig *string) *c
 				postApplyCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 				defer cancel()
 
-				err = engine.PostApply(postApplyCtx, p)
+				err = engine.PostApply(postApplyCtx, applyProfile)
 				if err != nil {
 					fmt.Printf("Post-apply failed for %s: %v\n", p.Name, err)
 				}

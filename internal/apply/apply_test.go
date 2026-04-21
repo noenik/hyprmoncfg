@@ -598,6 +598,21 @@ func TestEnginePostApply(t *testing.T) {
 	}
 }
 
+func TestEngineApplyPostApplyFailureWithNilLogger(t *testing.T) {
+	engine, _, err := initTestEngine(t)
+	if err != nil {
+		t.Fatalf("init test engine: %v", err)
+	}
+	engine.Logf = nil
+
+	p := newTestProfile()
+	p.Exec = "/definitely/missing/post-apply-script"
+
+	if _, err := engine.Apply(context.Background(), p, monitors, ApplyModeNonInteractive); err != nil {
+		t.Fatalf("apply should not fail when post-apply logging is unset: %v", err)
+	}
+}
+
 func initTestEngine(t *testing.T) (engine *Engine, logPath string, err error) {
 	dir := t.TempDir()
 	logPath = filepath.Join(dir, "hyprctl.log")

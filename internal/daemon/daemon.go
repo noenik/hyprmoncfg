@@ -3,20 +3,23 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/crmne/hyprmoncfg/internal/apply"
 	"github.com/crmne/hyprmoncfg/internal/hypr"
+	"github.com/crmne/hyprmoncfg/internal/lid"
 	"github.com/crmne/hyprmoncfg/internal/profile"
 )
 
 type Config struct {
-	Debounce      time.Duration
-	PollInterval  time.Duration
-	ForcedProfile string
-	MonitorsConf  string
-	HyprConfig    string
-	Logf          func(format string, args ...any)
+	Debounce        time.Duration
+	PollInterval    time.Duration
+	LidPollInterval time.Duration
+	ForcedProfile   string
+	MonitorsConf    string
+	HyprConfig      string
+	Logf            func(format string, args ...any)
 }
 
 type Service struct {
@@ -26,6 +29,7 @@ type Service struct {
 	cfg          Config
 	applied      string
 	lastSeenHash string
+	lidState     lid.State
 }
 
 func New(client *hypr.Client, store *profile.Store, cfg Config) *Service {
@@ -34,6 +38,9 @@ func New(client *hypr.Client, store *profile.Store, cfg Config) *Service {
 	}
 	if cfg.PollInterval <= 0 {
 		cfg.PollInterval = 5 * time.Second
+	}
+	if cfg.LidPollInterval <= 0 {
+		cfg.LidPollInterval = lid.DefaultPollInterval
 	}
 	if cfg.Logf == nil {
 		cfg.Logf = func(string, ...any) {}
@@ -47,7 +54,8 @@ func New(client *hypr.Client, store *profile.Store, cfg Config) *Service {
 			HyprlandConfigPath: cfg.HyprConfig,
 			Logf:               cfg.Logf,
 		},
-		cfg: cfg,
+		cfg:      cfg,
+		lidState: lid.Unknown,
 	}
 }
 
@@ -68,6 +76,16 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 
 	pushTrigger("startup")
+
+	var lidStates <-chan lid.State
+	var lidErrs <-chan error
+	if state, err := lid.ReadState(ctx); err != nil {
+		s.cfg.Logf("lid events disabled: %v", err)
+	} else {
+		s.lidState = state
+		s.cfg.Logf("lid state: %s", state)
+		lidStates, lidErrs = lid.Watch(ctx, s.cfg.LidPollInterval)
+	}
 
 	events, eventErrs := s.client.SubscribeMonitorEvents(ctx)
 	go func() {
@@ -91,9 +109,30 @@ func (s *Service) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case err, ok := <-eventErrs:
-			if ok && err != nil {
+			if !ok {
+				eventErrs = nil
+				continue
+			}
+			if err != nil {
 				s.cfg.Logf("socket2 disabled: %v", err)
 				eventErrs = nil
+			}
+		case state, ok := <-lidStates:
+			if !ok {
+				lidStates = nil
+				continue
+			}
+			if state != s.lidState {
+				s.lidState = state
+				pushTrigger("lid:" + string(state))
+			}
+		case err, ok := <-lidErrs:
+			if !ok {
+				lidErrs = nil
+				continue
+			}
+			if err != nil {
+				s.cfg.Logf("lid state unavailable: %v", err)
 			}
 		case <-pollTicker.C:
 			monitors, err := s.client.Monitors(ctx)
@@ -155,16 +194,42 @@ func (s *Service) applyBest(ctx context.Context) error {
 			s.cfg.Logf("no matching profile for monitor set %s", hash)
 			return nil
 		}
-		s.cfg.Logf("best profile %q score=%d", best.Name, score)
+		if s.lidState.Known() {
+			s.cfg.Logf("best profile %q score=%d lid=%s", best.Name, score, s.lidState)
+		} else {
+			s.cfg.Logf("best profile %q score=%d", best.Name, score)
+		}
 		target = best
 	}
 
-	applyKey := target.Name + "|" + hash
+	effective := target
+	if s.lidState == lid.Closed {
+		adjusted, adjustment := profile.ApplyClosedLidPolicy(target, monitors)
+		effective = adjusted
+		if adjustment.Applied {
+			disabled := strings.Join(adjustment.DisabledOutputNames, ",")
+			if disabled == "" {
+				disabled = "already disabled"
+			}
+			workspaceTarget := adjustment.WorkspaceTargetName
+			if workspaceTarget == "" {
+				workspaceTarget = "none"
+			}
+			s.cfg.Logf(
+				"lid closed: forced internal outputs off (%s), workspace target=%s retargeted=%d",
+				disabled,
+				workspaceTarget,
+				adjustment.RetargetedWorkspaces,
+			)
+		}
+	}
+
+	applyKey := target.Name + "|" + hash + "|lid=" + string(s.lidState)
 	if applyKey == s.applied {
 		return nil
 	}
 
-	if _, err := s.engine.Apply(ctx, target, monitors); err != nil {
+	if _, err := s.engine.Apply(ctx, effective, monitors); err != nil {
 		return err
 	}
 
@@ -176,7 +241,7 @@ func (s *Service) applyBest(ctx context.Context) error {
 		appliedHash = profile.MonitorStateHash(appliedMonitors)
 	}
 
-	s.applied = target.Name + "|" + appliedHash
+	s.applied = target.Name + "|" + appliedHash + "|lid=" + string(s.lidState)
 	s.lastSeenHash = appliedHash
 	s.cfg.Logf("applied profile: %s", target.Name)
 	return nil

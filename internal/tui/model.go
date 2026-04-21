@@ -15,6 +15,7 @@ import (
 
 	"github.com/crmne/hyprmoncfg/internal/apply"
 	"github.com/crmne/hyprmoncfg/internal/hypr"
+	"github.com/crmne/hyprmoncfg/internal/lid"
 	"github.com/crmne/hyprmoncfg/internal/profile"
 )
 
@@ -50,6 +51,8 @@ type refreshMsg struct {
 	profiles       []profile.Profile
 	workspaceRules []hypr.WorkspaceRule
 	workspaces     []hypr.WorkspaceState
+	lidState       lid.State
+	background     bool
 	err            error
 }
 
@@ -126,6 +129,7 @@ type editableOutput struct {
 	Transform         int
 	Focused           bool
 	DPMSStatus        bool
+	IsInternal        bool
 	MirrorOf          string
 	ActiveWorkspace   string
 	Bitdepth          int
@@ -215,6 +219,7 @@ type Model struct {
 	profiles       []profile.Profile
 	workspaceRules []hypr.WorkspaceRule
 	workspaces     []hypr.WorkspaceState
+	lidState       lid.State
 
 	editOutputs     []editableOutput
 	workspaceEdit   workspaceEditor
@@ -242,6 +247,7 @@ type Model struct {
 	draftProfileName string
 	draftExec        string
 	daemonOK         bool
+	refreshInFlight  bool
 
 	width  int
 	height int
@@ -279,7 +285,7 @@ func NewModel(client *hypr.Client, store *profile.Store, monitorsConfPath string
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.refreshCmd(), tickCmd())
+	return tea.Batch(m.refreshCmd(false), tickCmd())
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -303,22 +309,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case refreshMsg:
+		m.refreshInFlight = false
 		if msg.err != nil {
 			m.setStatusErr(msg.err.Error())
 			return m, nil
 		}
+
+		prevSig := m.liveConfigSignature()
+		nextSig := liveConfigSignature(msg.monitors, msg.lidState)
+		liveChanged := prevSig != nextSig
+		wasDirty := m.dirty
 
 		m.daemonOK = isDaemonRunning()
 		m.monitors = msg.monitors
 		m.profiles = msg.profiles
 		m.workspaceRules = msg.workspaceRules
 		m.workspaces = msg.workspaces
+		m.lidState = msg.lidState
 
-		if len(m.editOutputs) == 0 || !m.dirty {
+		reloadLive := len(m.editOutputs) == 0 || liveChanged || (!msg.background && !m.dirty)
+		if reloadLive {
 			m.loadLiveState()
+			if liveChanged && wasDirty {
+				m.markClean()
+				m.setStatusOK("Monitor configuration changed. Reloaded live state.")
+				m.syncSelections()
+				return m, nil
+			}
 		}
 		m.syncSelections()
-		m.status = ""
+		if !msg.background {
+			m.status = ""
+		}
 		return m, nil
 
 	case saveMsg:
@@ -329,7 +351,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.profileTab {
 			m.setStatusOK(fmt.Sprintf("Saved profile %q", msg.name))
-			return m, m.refreshCmd()
+			return m, m.refreshCmd(false)
 		}
 		action := saveActionOnly
 		if m.saveDialog != nil {
@@ -346,12 +368,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if action == saveActionApply {
 			return m, tea.Batch(
-				m.refreshCmd(),
+				m.refreshCmd(false),
 				m.applyCmd(m.currentProfile(msg.name)),
 			)
 		}
 		m.setStatusOK(fmt.Sprintf("Saved profile %q", msg.name))
-		return m, m.refreshCmd()
+		return m, m.refreshCmd(false)
 
 	case clearSnapMsg:
 		if m.snap != nil && msg.token == m.snap.Token {
@@ -376,7 +398,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.setStatusOK(fmt.Sprintf("Deleted profile %q", msg.name))
 		m.selectedProfile = clampIndex(m.selectedProfile, len(m.profiles))
-		return m, m.refreshCmd()
+		return m, m.refreshCmd(false)
 
 	case applyMsg:
 		if msg.err != nil {
@@ -405,7 +427,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.draftProfileName = ""
 		m.draftExec = ""
 		m.setStatusOK("Configuration reverted: " + msg.reason)
-		return m, m.refreshCmd()
+		return m, m.refreshCmd(false)
 
 	case openURLMsg:
 		if msg.err != nil {
@@ -421,7 +443,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.revertCmd(snapshot, "timeout")
 			}
 		}
-		return m, tickCmd()
+		cmds := []tea.Cmd{tickCmd()}
+		if !m.refreshInFlight {
+			m.refreshInFlight = true
+			cmds = append(cmds, m.refreshCmd(true))
+		}
+		return m, tea.Batch(cmds...)
 
 	case tea.KeyMsg:
 		switch m.mode {
@@ -488,7 +515,7 @@ func (m Model) updateMainKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.draftProfileName = ""
 		m.draftExec = ""
 		m.markClean()
-		return m, m.refreshCmd()
+		return m, m.refreshCmd(false)
 	case "s":
 		if m.tab == tabProfiles {
 			if len(m.profiles) == 0 {
@@ -674,7 +701,7 @@ func (m Model) updateConfirmKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.pending = nil
 		m.markClean()
 		m.setStatusOK("Configuration kept")
-		return m, tea.Batch(m.refreshCmd(), toastCmd)
+		return m, tea.Batch(m.refreshCmd(false), toastCmd)
 	case "n", "esc":
 		snapshot := m.pending.snapshot
 		return m, m.revertCmd(snapshot, "user request")
@@ -792,6 +819,10 @@ func (m Model) renderCanvasPane(width int, height int) string {
 	if showLegend {
 		nonCanvasLines += 4
 	}
+	showLidState := m.lidStatusLine() != "" && innerHeight >= 8
+	if showLidState {
+		nonCanvasLines++
+	}
 
 	disabled := make([]string, 0)
 	for _, output := range m.editOutputs {
@@ -809,6 +840,9 @@ func (m Model) renderCanvasPane(width int, height int) string {
 
 	canvasHeight := max(1, innerHeight-nonCanvasLines)
 	lines := []string{m.styles.header.Render("Monitor Layout")}
+	if showLidState {
+		lines = append(lines, m.styles.subtle.Render(m.lidStatusLine()))
+	}
 	lines = append(lines, m.renderCanvas(max(1, innerWidth-2), canvasHeight))
 
 	legend := lipgloss.JoinHorizontal(
@@ -829,6 +863,17 @@ func (m Model) renderCanvasPane(width int, height int) string {
 		lines = append(lines, m.styles.subtle.Render("Mirrors: "+strings.Join(mirrors, ", ")))
 	}
 	return panel.Width(innerWidth).Render(fitBlock(strings.Join(lines, "\n"), innerWidth, innerHeight))
+}
+
+func (m Model) lidStatusLine() string {
+	switch m.lidState {
+	case lid.Closed:
+		return "Lid: closed · internal displays are forced off when profiles apply"
+	case lid.Open:
+		return "Lid: open"
+	default:
+		return ""
+	}
 }
 
 func (m Model) renderCanvas(width, height int) string {
@@ -1268,6 +1313,7 @@ func (m Model) compactLayoutHeights(total int) (int, int) {
 func (m Model) inspectorDetailLines(output editableOutput) []string {
 	lines := []string{
 		fmt.Sprintf("%s %s", m.styles.label.Render("Connector "), m.styles.value.Render(output.Name)),
+		fmt.Sprintf("%s %s", m.styles.label.Render("Type      "), m.styles.value.Render(outputTypeLabel(output))),
 		fmt.Sprintf("%s %s", m.styles.label.Render("Model     "), m.styles.value.Render(output.displayModelLabel())),
 		fmt.Sprintf("%s %s", m.styles.label.Render("Serial    "), m.styles.value.Render(blankFallback(strings.TrimSpace(output.Serial), "(none)"))),
 		fmt.Sprintf("%s %s", m.styles.label.Render("Layout px "), m.styles.value.Render(output.layoutSizeLabel())),
@@ -1278,6 +1324,13 @@ func (m Model) inspectorDetailLines(output editableOutput) []string {
 		lines = append(lines, fmt.Sprintf("%s %s", m.styles.label.Render("Panel mm  "), m.styles.value.Render(fmt.Sprintf("%d x %d mm", output.PhysicalWidth, output.PhysicalHeight))))
 	}
 	return lines
+}
+
+func outputTypeLabel(output editableOutput) string {
+	if output.IsInternal {
+		return "Internal display"
+	}
+	return "External display"
 }
 
 func fitBlock(text string, width int, height int) string {
@@ -1832,7 +1885,15 @@ func (m *Model) nudgeSelectedOutput(dx, dy int, snapThreshold int) tea.Cmd {
 	return m.showSnapHint(m.previewSelectedSnap(snapThreshold))
 }
 
-func (m Model) refreshCmd() tea.Cmd {
+func liveConfigSignature(monitors []hypr.Monitor, lidState lid.State) string {
+	return profile.MonitorStateHash(monitors) + "|lid=" + string(lidState)
+}
+
+func (m Model) liveConfigSignature() string {
+	return liveConfigSignature(m.monitors, m.lidState)
+}
+
+func (m Model) refreshCmd(background bool) tea.Cmd {
 	client := m.client
 	store := m.store
 	return func() tea.Msg {
@@ -1841,19 +1902,23 @@ func (m Model) refreshCmd() tea.Cmd {
 
 		monitors, err := client.Monitors(ctx)
 		if err != nil {
-			return refreshMsg{err: err}
+			return refreshMsg{background: background, err: err}
 		}
 		profiles, err := store.List()
 		if err != nil {
-			return refreshMsg{err: err}
+			return refreshMsg{background: background, err: err}
 		}
 		workspaceRules, err := client.WorkspaceRules(ctx)
 		if err != nil {
-			return refreshMsg{err: err}
+			return refreshMsg{background: background, err: err}
 		}
 		workspaces, err := client.Workspaces(ctx)
 		if err != nil {
-			return refreshMsg{err: err}
+			return refreshMsg{background: background, err: err}
+		}
+		lidState, err := lid.ReadState(ctx)
+		if err != nil {
+			lidState = lid.Unknown
 		}
 
 		return refreshMsg{
@@ -1861,6 +1926,8 @@ func (m Model) refreshCmd() tea.Cmd {
 			profiles:       profiles,
 			workspaceRules: workspaceRules,
 			workspaces:     workspaces,
+			lidState:       lidState,
+			background:     background,
 		}
 	}
 }
@@ -1906,11 +1973,15 @@ func (m Model) applyCmd(p profile.Profile) tea.Cmd {
 		if err != nil {
 			return applyMsg{profile: p, err: err}
 		}
-		snapshot, err := engine.Apply(ctx, p, monitors, apply.ApplyModeInteractive)
+		applyProfile := p
+		if state, err := lid.ReadState(ctx); err == nil && state == lid.Closed {
+			applyProfile, _ = profile.ApplyClosedLidPolicy(p, monitors)
+		}
+		snapshot, err := engine.Apply(ctx, applyProfile, monitors, apply.ApplyModeInteractive)
 		if err != nil {
 			return applyMsg{profile: p, err: err}
 		}
-		return applyMsg{profile: p, snapshot: snapshot}
+		return applyMsg{profile: applyProfile, snapshot: snapshot}
 	}
 }
 
@@ -2136,6 +2207,7 @@ func editableOutputFromMonitor(m hypr.Monitor, matchCounts map[string]int) edita
 		Transform:       m.Transform,
 		Focused:         m.Focused,
 		DPMSStatus:      m.DPMSStatus,
+		IsInternal:      m.IsInternal(),
 		MirrorOf:        m.MirrorOf,
 		ActiveWorkspace: m.ActiveWorkspace.Name,
 		Bitdepth:        m.Bitdepth(),
@@ -2174,6 +2246,7 @@ func editableOutputFromProfile(saved profile.OutputConfig, live hypr.Monitor, ha
 		Scale:             clampFloat(saved.Scale, 0.25, 4.0),
 		VRR:               saved.VRR,
 		Transform:         saved.Transform,
+		IsInternal:        isInternalOutputName(saved.Name),
 		MirrorOf:          saved.MirrorOf,
 		Bitdepth:          saved.Bitdepth,
 		CM:                saved.CM,
@@ -2197,6 +2270,7 @@ func editableOutputFromProfile(saved profile.OutputConfig, live hypr.Monitor, ha
 		output.PhysicalHeight = live.PhysicalHeight
 		output.Focused = live.Focused
 		output.DPMSStatus = live.DPMSStatus
+		output.IsInternal = live.IsInternal()
 		output.ActiveWorkspace = live.ActiveWorkspace.Name
 		output.Modes = normalizeModes(live.AvailableModes, mode)
 	} else {
@@ -2411,6 +2485,11 @@ func (o editableOutput) displayModelLabel() string {
 	return "(unknown)"
 }
 
+func isInternalOutputName(name string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	return strings.HasPrefix(name, "edp") || strings.HasPrefix(name, "lvds") || strings.HasPrefix(name, "dsi")
+}
+
 type cardLine struct {
 	text string
 	fg   string
@@ -2418,6 +2497,9 @@ type cardLine struct {
 }
 
 func (o editableOutput) cardModelLabel() string {
+	if o.IsInternal {
+		return "Internal · " + o.displayModelLabel()
+	}
 	return o.displayModelLabel()
 }
 

@@ -115,6 +115,8 @@ Before you turn on automatic switching, make sure your profile library reflects 
 - Delete throwaway profiles you created while experimenting
 - Re-save the profile you actually use instead of keeping old variants around
 
+On laptops, you do not need a separate closed-lid profile. Save the profile for the monitors you attach at that desk. When the lid is closed and an external monitor is connected, hyprmoncfg forces the internal laptop panel off for the apply and moves workspaces away from it.
+
 ## Apply from the command line
 
 ```bash
@@ -155,7 +157,7 @@ systemctl --user daemon-reload
 systemctl --user enable --now hyprmoncfgd
 ```
 
-Now when you plug in a monitor, unplug one, or dock your laptop, the daemon finds the profile that best matches your current hardware and applies it. No interaction needed.
+Now when you plug in a monitor, unplug one, dock your laptop, or close the lid, the daemon finds the profile that best matches your current hardware and applies it. No interaction needed.
 
 If the daemon ever applies a layout you didn't expect, the most common cause is stale or duplicate profiles in `~/.config/hyprmoncfg/profiles/`. The daemon scores every profile it finds, not just the ones you remember saving. Delete old experiments, keep one profile per real setup, and the matching becomes predictable. See [Daemon Behavior](/daemon/) for the full scoring breakdown.
 

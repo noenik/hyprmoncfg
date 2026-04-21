@@ -208,7 +208,9 @@ func (e Engine) Apply(ctx context.Context, p profile.Profile, monitors []hypr.Mo
 
 	if mode == ApplyModeNonInteractive {
 		if err = e.PostApply(ctx, p); err != nil {
-			e.Logf("post apply: %v", err)
+			if e.Logf != nil {
+				e.Logf("post apply: %v", err)
+			}
 		}
 	}
 
